@@ -74,10 +74,14 @@
     if (mx && my) { const k = Math.SQRT1_2; mx *= k; my *= k; }
     if (sx && sy) { const k = Math.SQRT1_2; sx *= k; sy *= k; }
 
+    // Habilidad activa: pulsación única (se consume en este fotograma).
+    const use = s.use ? consume(s.use) : false;
+
     return {
       mx: Utils.r1(mx), my: Utils.r1(my),
       sx: Utils.r1(sx), sy: Utils.r1(sy),
       fire: !!(sx || sy),
+      use,
     };
   }
 

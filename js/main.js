@@ -32,8 +32,22 @@
     joinStatus: $('#join-status'),
     playerNameInput: $('#player-name'),
     joinName: $('#join-name'),
-    skinPicker: $('#skin-picker'),
-    skinPickerJoin: $('#skin-picker-join'),
+    charPicker: $('#char-picker'),
+    charPickerJoin: $('#char-picker-join'),
+    menuCoins: $('#menu-coins'),
+    menuAch: $('#menu-ach'),
+    menuAchTotal: $('#menu-ach-total'),
+    ovShop: $('#ov-shop'),
+    ovProgress: $('#ov-progress'),
+    ovUpgrades: $('#ov-upgrades'),
+    shopGrid: $('#shop-grid'),
+    shopCoins: $('#shop-coins'),
+    progStats: $('#prog-stats'),
+    achList: $('#ach-list'),
+    progAchCount: $('#prog-ach-count'),
+    upgList: $('#upg-list'),
+    achToasts: $('#ach-toasts'),
+    endCoins: $('#end-coins'),
     toast: $('#toast'),
   };
 
@@ -43,12 +57,14 @@
   let roomCode = '';
   let playerName = 'Jugador';
   let playerSkin = 0;
+  let playerChar = 'isaac';
   let lobbyPeers = [];           // {id, name, color, isHost}
   let myClientId = null;
   let hostSeed = 0, hostFloor = 1;
   let toastTimer = 0;
   let idleT = 0;
   let endHandled = false;
+  let runRewarded = false;
 
   // ---------------------------------------------------------
   // Utilidades de interfaz
@@ -64,14 +80,14 @@
   }
 
   function showOverlay(which) {
-    [ui.ovMain, ui.ovHelp, ui.ovLobby, ui.ovJoin, ui.ovPause, ui.ovEnd].forEach(hide);
+    [ui.ovMain, ui.ovHelp, ui.ovLobby, ui.ovJoin, ui.ovPause, ui.ovEnd, ui.ovShop, ui.ovProgress].forEach(hide);
     if (which) show(which);
   }
 
   function setScene(s) {
     scene = s;
     if (s === 'playing') { show(ui.topbar); showOverlay(null); }
-    else hide(ui.topbar);
+    else { hide(ui.topbar); setUpgradesVisible(false); }
   }
 
   function updateTopbar(view) {
@@ -119,46 +135,309 @@
   }
 
   // ---------------------------------------------------------
-  // Skins del personaje
+  // PERSONAJES (sustituyen a las skins) y PROGRESO persistente
+  // Los módulos Characters y Meta son opcionales: si no están
+  // cargados la interfaz se degrada con elegancia.
   // ---------------------------------------------------------
-  function loadSavedSkin() {
-    try {
-      const v = parseInt(localStorage.getItem('llanto-skin'), 10);
-      return isFinite(v) ? Entities.normSkin(v) : 0;
-    } catch (e) { return 0; }
+  const CH = () => ((global.Characters && global.Characters.LIST) ? global.Characters : null);
+  const MT = () => global.Meta || null;
+
+  function loadSavedChar() {
+    const ch = CH(); if (!ch) return 'isaac';
+    const mt = MT();
+    let id = '';
+    try { id = localStorage.getItem('llanto-char') || ''; } catch (e) {}
+    const found = ch.byId(id);
+    if (found && (!mt || mt.isUnlocked(found.id))) return found.id;
+    const first = ch.LIST.find((c) => !mt || mt.isUnlocked(c.id));
+    return first ? first.id : 'isaac';
   }
 
-  function saveSkin(i) {
-    try { localStorage.setItem('llanto-skin', String(i)); } catch (e) {}
+  function saveChar(id) {
+    try { localStorage.setItem('llanto-char', id); } catch (e) {}
   }
 
-  function renderSkinPickers() {
-    [ui.skinPicker, ui.skinPickerJoin].forEach((box) => {
+  function faceSpan(char) {
+    const f = document.createElement('span');
+    f.className = 'face';
+    f.style.background = Entities.skinColor(char.skin);
+    return f;
+  }
+
+  function setChar(id) {
+    const ch = CH(); if (!ch) return;
+    const c = ch.byId(id);
+    if (!c) return;
+    const mt = MT();
+    if (mt && !mt.isUnlocked(id)) return;
+    playerChar = id;
+    playerSkin = Entities.normSkin(c.skin);
+    saveChar(id);
+    Sfx.play('ui');
+    renderCharPickers();
+  }
+
+  function renderCharPickers() {
+    const ch = CH();
+    if (!ch) return;
+    const mt = MT();
+    [ui.charPicker, ui.charPickerJoin].forEach((box) => {
       if (!box) return;
       box.innerHTML = '';
-      Entities.SKINS.forEach((sk, i) => {
+      ch.LIST.forEach((c) => {
+        const owned = !mt || mt.isUnlocked(c.id);
+        if (c.hidden && !owned) return;
         const b = document.createElement('button');
         b.type = 'button';
-        b.className = 'skin-btn' + (i === playerSkin ? ' selected' : '');
-        b.title = sk.name;
-        b.setAttribute('data-skin', String(i));
-        b.setAttribute('aria-label', sk.name);
-        b.style.borderColor = i === playerSkin ? '' : sk.color;
-        const f = document.createElement('span');
-        f.className = 'face';
-        f.style.background = sk.skin;
-        b.appendChild(f);
+        b.className = 'char-btn' + (c.id === playerChar ? ' selected' : '') + (owned ? '' : ' locked');
+        b.title = c.name + (owned ? '' : ' — desbloquéalo en la tienda');
+        b.setAttribute('data-char', c.id);
+        b.setAttribute('aria-label', c.name);
+        b.appendChild(faceSpan(c));
+        const nm = document.createElement('span');
+        nm.className = 'cname';
+        nm.textContent = c.name;
+        b.appendChild(nm);
+        if (!owned) {
+          const lk = document.createElement('span');
+          lk.className = 'lock';
+          lk.textContent = '🔒';
+          b.appendChild(lk);
+        }
         box.appendChild(b);
       });
     });
   }
 
-  function setSkin(i) {
-    playerSkin = Entities.normSkin(i);
-    saveSkin(playerSkin);
-    renderSkinPickers();
-    Sfx.play('ui');
+  function renderMetaBar() {
+    const mt = MT(); if (!mt) return;
+    if (ui.menuCoins) ui.menuCoins.textContent = String(mt.coins);
+    if (ui.menuAch) ui.menuAch.textContent = String(mt.achievementCount());
+    if (ui.menuAchTotal) ui.menuAchTotal.textContent = String(mt.ACHIEVEMENTS.length);
   }
+
+  function renderShop() {
+    const ch = CH(); const mt = MT();
+    if (!ch || !mt || !ui.shopGrid) return;
+    if (ui.shopCoins) ui.shopCoins.textContent = String(mt.coins);
+    ui.shopGrid.innerHTML = '';
+    ch.LIST.forEach((c) => {
+      const st = mt.charStatus(c);
+      if (st.state === 'hidden') return;
+      const card = document.createElement('div');
+      card.className = 'shop-card' + (st.state === 'owned' ? ' owned' : '');
+      card.appendChild(faceSpan(c));
+      const info = document.createElement('div');
+      info.className = 'info';
+
+      const h = document.createElement('h4');
+      h.textContent = c.name;
+      info.appendChild(h);
+
+      const tag = document.createElement('p');
+      tag.className = 'tagline';
+      tag.textContent = 'Activa: ' + c.active.name + ' · Pasiva: ' + c.passive.name;
+      info.appendChild(tag);
+
+      const ab = document.createElement('p');
+      ab.className = 'ab';
+      ab.textContent = '⚡ ' + c.active.desc + ' (' + c.active.charges + ' cargas · ' + c.active.cd + ' s)';
+      info.appendChild(ab);
+
+      const pv = document.createElement('p');
+      pv.className = 'pv';
+      pv.textContent = '✦ ' + c.passive.desc;
+      info.appendChild(pv);
+
+      if (st.state === 'owned') {
+        const b = document.createElement('button');
+        b.className = 'btn small';
+        b.setAttribute('data-char', c.id);
+        b.textContent = c.id === playerChar ? '✓ Elegido' : 'Elegir';
+        info.appendChild(b);
+      } else if (st.state === 'buyable') {
+        const cost = document.createElement('div');
+        cost.className = 'cost';
+        cost.textContent = '🪙 ' + st.cost + ' monedas';
+        info.appendChild(cost);
+        const b = document.createElement('button');
+        b.className = 'btn small primary';
+        b.setAttribute('data-buy', c.id);
+        b.textContent = st.affordable ? 'Comprar' : 'Faltan monedas';
+        b.disabled = !st.affordable;
+        info.appendChild(b);
+      } else if (st.state === 'locked') {
+        const cost = document.createElement('div');
+        cost.className = 'cost';
+        cost.textContent = '🔒 ' + (st.reason || 'Bloqueado');
+        info.appendChild(cost);
+      }
+
+      card.appendChild(info);
+      ui.shopGrid.appendChild(card);
+    });
+  }
+
+  function buyChar(id) {
+    const ch = CH(); const mt = MT();
+    if (!ch || !mt) return;
+    const c = ch.byId(id);
+    if (!c) return;
+    const res = mt.buyChar(c);
+    if (res.ok) {
+      if (!res.already) toast('¡' + c.name + ' desbloqueado!');
+      setChar(id);
+      renderShop(); renderMetaBar(); renderCharPickers();
+    } else {
+      toast(res.reason || 'No se pudo comprar');
+    }
+  }
+
+  function renderProgress() {
+    const mt = MT(); if (!mt) return;
+    const s = mt.get().stats;
+    if (ui.progStats) {
+      ui.progStats.innerHTML = '';
+      const chips = [
+        ['Monedas', mt.coins],
+        ['Partidas', s.runs],
+        ['Victorias', s.wins],
+        ['Piso máximo', s.bestFloor],
+        ['Enemigos', s.totalKills],
+        ['Jefes', Object.keys(s.bosses || {}).length],
+        ['Sucesos raros', s.events || 0],
+        ['Logros', mt.achievementCount() + '/' + mt.ACHIEVEMENTS.length],
+      ];
+      for (const pair of chips) {
+        const c = document.createElement('div');
+        c.className = 'chip';
+        c.innerHTML = pair[0] + ': <b>' + pair[1] + '</b>';
+        ui.progStats.appendChild(c);
+      }
+    }
+    if (ui.achList) {
+      ui.achList.innerHTML = '';
+      mt.ACHIEVEMENTS.forEach((a) => {
+        const earned = mt.hasAchievement(a.id);
+        const li = document.createElement('li');
+        if (earned) li.className = 'earned';
+        const ico = document.createElement('span');
+        ico.className = 'ico';
+        ico.textContent = earned ? '🏆' : '🔒';
+        li.appendChild(ico);
+        const wrap = document.createElement('div');
+        const b = document.createElement('b'); b.textContent = a.name;
+        const sp = document.createElement('span'); sp.textContent = a.desc;
+        wrap.appendChild(b); wrap.appendChild(sp);
+        li.appendChild(wrap);
+        ui.achList.appendChild(li);
+      });
+    }
+    if (ui.progAchCount) ui.progAchCount.textContent = mt.achievementCount() + '/' + mt.ACHIEVEMENTS.length;
+  }
+
+  // ---------------------------------------------------------
+  // Avisos de logro (abajo a la izquierda)
+  // ---------------------------------------------------------
+  function pollAchievements() {
+    const mt = MT();
+    if (!mt || !mt.drainToasts) return;
+    const list = mt.drainToasts();
+    for (const id of list) {
+      const a = mt.ACH_BY_ID[id];
+      if (a) showAchToast(a);
+    }
+  }
+
+  function showAchToast(a) {
+    if (!ui.achToasts) return;
+    Sfx.play('win');
+    const card = document.createElement('div');
+    card.className = 'ach-toast';
+    const ico = document.createElement('span');
+    ico.className = 'ico'; ico.textContent = '🏆';
+    const wrap = document.createElement('div');
+    const b = document.createElement('b'); b.textContent = 'Logro: ' + a.name;
+    const sp = document.createElement('span'); sp.textContent = a.desc;
+    wrap.appendChild(b); wrap.appendChild(sp);
+    card.appendChild(ico); card.appendChild(wrap);
+    ui.achToasts.appendChild(card);
+    setTimeout(() => {
+      if (card.remove) card.remove();
+      else if (ui.achToasts.removeChild) { try { ui.achToasts.removeChild(card); } catch (e) {} }
+    }, 4400);
+  }
+
+  // ---------------------------------------------------------
+  // Panel de mejoras (mantener Tab · solo para quien lo pulsa)
+  // ---------------------------------------------------------
+  let upgradesHeld = false;
+
+  function renderUpgrades() {
+    if (!ui.upgList) return;
+    const view = Game.G.running ? Game.view() : null;
+    if (!view) return;
+    const me = view.players.find((p) => p.id === view.localId) || view.players[0];
+    ui.upgList.innerHTML = '';
+    const items = view.items || [];
+    if (!items.length) {
+      const p = document.createElement('p');
+      p.className = 'subtitle';
+      p.textContent = 'Todavía no tenéis ninguna mejora. ¡Abrid cofres y comprad en las tiendas!';
+      ui.upgList.appendChild(p);
+      return;
+    }
+    for (const id of items) {
+      const item = Entities.itemById(id);
+      if (!item) continue;
+      const card = document.createElement('div');
+      card.className = 'upg-card';
+      const head = document.createElement('div');
+      head.className = 'uname';
+      const dot = document.createElement('span');
+      dot.className = 'doti';
+      dot.style.background = item.color || '#9fb3c8';
+      head.appendChild(dot);
+      const nm = document.createElement('span');
+      nm.textContent = item.name;
+      head.appendChild(nm);
+      const tier = document.createElement('span');
+      tier.className = 'tier';
+      const td = Entities.tierOf(item);
+      if (td) { tier.textContent = td.name; tier.style.color = td.color; }
+      head.appendChild(tier);
+      card.appendChild(head);
+
+      const desc = document.createElement('div');
+      desc.className = 'upg-desc';
+      desc.textContent = item.desc || '';
+      if (me) {
+        const deltas = Entities.itemStatDeltas(item, me);
+        for (const d of deltas) {
+          const line = document.createElement('div');
+          line.className = 'delta' + (d.positive ? '' : ' neg');
+          line.textContent = '· ' + d.label + ' ' + d.text;
+          desc.appendChild(line);
+        }
+        const syns = Entities.synergyWith(item, me);
+        for (const s of syns.slice(0, 3)) {
+          const line = document.createElement('div');
+          line.className = 'syn';
+          line.textContent = '⚡ ' + s.name;
+          desc.appendChild(line);
+        }
+      }
+      card.appendChild(desc);
+      ui.upgList.appendChild(card);
+    }
+  }
+
+  function setUpgradesVisible(v) {
+    if (!ui.ovUpgrades) return;
+    if (v) { renderUpgrades(); show(ui.ovUpgrades); }
+    else hide(ui.ovUpgrades);
+  }
+
 
   // ---------------------------------------------------------
   // Lobby
@@ -187,7 +466,7 @@
   }
 
   function localHostPeer() {
-    return { id: 'host', name: myName('Anfitrión'), skin: playerSkin, isHost: true };
+    return { id: 'host', name: myName('Anfitrión'), skin: playerSkin, char: playerChar, isHost: true };
   }
 
   // ---------------------------------------------------------
@@ -199,7 +478,7 @@
     Game.setHandlers({ onEnd: onGameEnd, onPing: null });
     Game.start({
       mode: 'local',
-      localPlayers: [{ id: 'p0', name: myName('Isaac'), skin: playerSkin, slot: 0, scheme: 'p1' }],
+      localPlayers: [{ id: 'p0', name: myName('Isaac'), skin: playerSkin, char: playerChar, slot: 0, scheme: 'p1' }],
     });
     setScene('playing');
   }
@@ -208,11 +487,18 @@
     Sfx.unlock();
     roomCode = '';
     Game.setHandlers({ onEnd: onGameEnd, onPing: null });
+    const ch = CH();
+    const owned = ch ? ch.LIST.filter((c) => !MT() || MT().isUnlocked(c.id)) : [];
+    const p2 = owned.find((c) => c.id !== playerChar) || null;
     Game.start({
       mode: 'local',
       localPlayers: [
-        { id: 'p0', name: myName('Isaac'), skin: playerSkin, slot: 0, scheme: 'p1' },
-        { id: 'p1', name: 'Magdalena', skin: Entities.normSkin(playerSkin + 3), slot: 1, scheme: 'p2' },
+        { id: 'p0', name: myName('Isaac'), skin: playerSkin, char: playerChar, slot: 0, scheme: 'p1' },
+        {
+          id: 'p1', name: p2 ? p2.name : 'Magdalena',
+          skin: p2 ? p2.skin : Entities.normSkin(playerSkin + 3),
+          char: p2 ? p2.id : undefined, slot: 1, scheme: 'p2',
+        },
       ],
     });
     setScene('playing');
@@ -277,6 +563,7 @@
           id: peerId,
           name: String(msg.name || 'Jugador').slice(0, 14),
           skin: Entities.normSkin(msg.skin != null ? msg.skin : slot),
+          char: (global.Characters && Characters.byId(msg.char)) ? msg.char : undefined,
           isHost: false,
         };
         lobbyPeers.push(entry);
@@ -287,14 +574,15 @@
           id: peerId,
           name: entry.name,
           skin: entry.skin,
+          char: entry.char,
           seed: Game.G.seed,
           floor: Game.G.floorNum,
           running,
-          players: lobbyPeers.map((p) => ({ id: p.id, name: p.name, skin: p.skin, isHost: p.isHost })),
+          players: lobbyPeers.map((p) => ({ id: p.id, name: p.name, skin: p.skin, char: p.char, isHost: p.isHost })),
         });
 
         if (running) {
-          Game.addRemotePlayer(peerId, entry.name, entry.skin);
+          Game.addRemotePlayer(peerId, entry.name, entry.skin, entry.char);
           Net.sendTo(peerId, { t: 'start', seed: Game.G.seed, floor: Game.G.floorNum });
           Net.sendTo(peerId, { t: 'state', s: Game.serialState() });
         } else {
@@ -323,12 +611,12 @@
   function broadcastLobby() {
     Net.broadcast({
       t: 'lobby',
-      players: lobbyPeers.map((p) => ({ id: p.id, name: p.name, skin: p.skin, isHost: p.isHost })),
+      players: lobbyPeers.map((p) => ({ id: p.id, name: p.name, skin: p.skin, char: p.char, isHost: p.isHost })),
     });
   }
 
   function startHostRun() {
-    const remote = lobbyPeers.filter((p) => !p.isHost).map((p) => ({ id: p.id, name: p.name, skin: p.skin }));
+    const remote = lobbyPeers.filter((p) => !p.isHost).map((p) => ({ id: p.id, name: p.name, skin: p.skin, char: p.char }));
     const seed = Utils.makeSeed();
     hostSeed = seed;
     hostFloor = 1;
@@ -337,7 +625,7 @@
       mode: 'host',
       seed,
       floorNum: 1,
-      localPlayers: [{ id: 'host', name: myName('Anfitrión'), skin: playerSkin, slot: 0, scheme: 'p1' }],
+      localPlayers: [{ id: 'host', name: myName('Anfitrión'), skin: playerSkin, char: playerChar, slot: 0, scheme: 'p1' }],
       remotePlayers: remote,
     });
     Net.broadcast({ t: 'start', seed, floor: 1 });
@@ -365,7 +653,7 @@
     Net.join(code, {
       onOpen() {
         ui.joinStatus.textContent = 'Conectado. Entrando…';
-        Net.sendToHost({ t: 'hello', name: myName('Jugador'), skin: playerSkin });
+        Net.sendToHost({ t: 'hello', name: myName('Jugador'), skin: playerSkin, char: playerChar });
       },
       onData(msg) {
         handleClientData(msg);
@@ -443,7 +731,7 @@
       seed: hostSeed,
       floorNum: hostFloor,
       localId: myClientId,
-      localPlayers: [{ id: myClientId, name: myName('Jugador'), skin: playerSkin, slot: 1, scheme: 'p1' }],
+      localPlayers: [{ id: myClientId, name: myName('Jugador'), skin: playerSkin, char: playerChar, slot: 1, scheme: 'p1' }],
     });
     setScene('playing');
   }
@@ -454,7 +742,6 @@
   function onGameEnd(kind) {
     if (endHandled) return;
     endHandled = true;
-    Sfx.stopMusic();
     const g = Game.G;
     if (kind === 'win') {
       ui.endTitle.textContent = '¡Victoria!';
@@ -462,6 +749,18 @@
     } else {
       ui.endTitle.textContent = 'Fin de la partida';
       ui.endText.textContent = 'Habéis caído en el piso ' + g.floorNum + '. Enemigos eliminados: ' + g.stats.kills + '.';
+    }
+    // Recompensa de progreso persistente (una vez por partida).
+    const mt = MT();
+    if (mt && !runRewarded) {
+      runRewarded = true;
+      const r = mt.finishRun(Game.runSummary());
+      if (ui.endCoins) {
+        ui.endCoins.textContent = '+' + r.coins + ' 🪙 de progreso (total: ' + r.total + ')';
+      }
+      renderMetaBar();
+    } else if (ui.endCoins) {
+      ui.endCoins.textContent = '';
     }
     setTimeout(() => { if (scene === 'playing') { showOverlay(ui.ovEnd); } }, 900);
   }
@@ -471,6 +770,8 @@
   // ---------------------------------------------------------
   function quitToMenu() {
     endHandled = false;
+    runRewarded = false;
+    setUpgradesVisible(false);
     Game.stop();
     Game.setPaused(false);
     if (isHosting || Net.role) {
@@ -485,10 +786,12 @@
     ui.joinStatus.textContent = '';
     setScene('menu');
     showOverlay(ui.ovMain);
+    renderMetaBar();
   }
 
   function restart() {
     endHandled = false;
+    runRewarded = false;
     const mode = Game.G.mode;
     if (mode === 'local') {
       if (Game.G.players.length > 1) playCoop(); else playSolo();
@@ -551,17 +854,12 @@
       const view = Game.view();
       Render.frame(view);
       updateTopbar(view);
-      if (Game.G.over) Sfx.stopMusic();
-      else {
-        const r = view.room;
-        Sfx.playMusic(r && r.type === 'boss' && !r.cleared ? 'boss' : 'floor');
-      }
     } else {
       acc = 0;
       paintIdle(dt);
-      if (scene === 'menu' || scene === 'lobby') Sfx.playMusic('menu');
     }
 
+    pollAchievements();
     if (Input.consume('KeyM')) toggleMute();
     if (Input.consume('Escape')) togglePause();
     Input.endFrame();
@@ -571,7 +869,7 @@
     if (scene !== 'playing' || !Game.G.running) return;
     const p = !Game.G.paused;
     Game.setPaused(p);
-    if (p) { show(ui.ovPause); } else { hide(ui.ovPause); }
+    if (p) { setUpgradesVisible(false); show(ui.ovPause); } else { hide(ui.ovPause); }
   }
 
   function toggleMute() {
@@ -599,6 +897,25 @@
         ui.joinCode.focus();
         break;
       case 'help': showOverlay(ui.ovHelp); break;
+      case 'shop': renderShop(); showOverlay(ui.ovShop); break;
+      case 'progress': renderProgress(); showOverlay(ui.ovProgress); break;
+      case 'wipe-ach': {
+        const mt = MT();
+        if (mt) { mt.resetAchievements(); renderProgress(); renderMetaBar(); toast('Logros borrados'); }
+        break;
+      }
+      case 'wipe-all': {
+        const mt = MT();
+        if (!mt) break;
+        if (global.confirm && !global.confirm('¿Borrar TODO el progreso? Esta acción no se puede deshacer.')) break;
+        mt.resetAll();
+        playerChar = loadSavedChar();
+        const c0 = CH() && CH().byId(playerChar);
+        if (c0) playerSkin = Entities.normSkin(c0.skin);
+        renderCharPickers(); renderShop(); renderProgress(); renderMetaBar();
+        toast('Progreso borrado por completo');
+        break;
+      }
       case 'back': showOverlay(ui.ovMain); setScene('menu'); break;
       case 'do-join': tryJoin(); break;
       case 'start-host': startHostRun(); break;
@@ -613,13 +930,32 @@
 
   function bindUI() {
     document.addEventListener('click', (e) => {
-      const sb = e.target.closest('[data-skin]');
-      if (sb && sb.getAttribute('data-skin') != null) {
-        setSkin(parseInt(sb.getAttribute('data-skin'), 10));
+      const buy = e.target.closest('[data-buy]');
+      if (buy && buy.getAttribute('data-buy') != null) {
+        buyChar(buy.getAttribute('data-buy'));
+        return;
+      }
+      const cb = e.target.closest('[data-char]');
+      if (cb && cb.getAttribute('data-char') != null) {
+        setChar(cb.getAttribute('data-char'));
+        if (scene === 'menu' || scene === 'lobby') renderShop();
         return;
       }
       const btn = e.target.closest('[data-action]');
       if (btn) onAction(btn.getAttribute('data-action'));
+    });
+
+    // Mantener Tab muestra el panel de mejoras; al soltar se oculta.
+    // Es solo para quien pulsa la tecla (overlay local, no toca la simulación).
+    document.addEventListener('keydown', (e) => {
+      if (e.code !== 'Tab' && e.key !== 'Tab') return;
+      if (scene !== 'playing' || !Game.G.running || Game.G.paused || Game.G.over) return;
+      if (e.preventDefault) e.preventDefault();
+      if (!upgradesHeld) { upgradesHeld = true; setUpgradesVisible(true); }
+    });
+    document.addEventListener('keyup', (e) => {
+      if (e.code !== 'Tab' && e.key !== 'Tab') return;
+      if (upgradesHeld) { upgradesHeld = false; setUpgradesVisible(false); }
     });
 
     ui.btnMute.addEventListener('click', toggleMute);
@@ -650,10 +986,13 @@
 
     // nombre del jugador (editable y recordado; dos campos sincronizados)
     playerName = loadSavedName() || 'Jugador ' + (1 + Math.floor(Math.random() * 9));
-    playerSkin = loadSavedSkin();
+    playerChar = loadSavedChar();
+    const ch0 = CH() && CH().byId(playerChar);
+    if (ch0) playerSkin = Entities.normSkin(ch0.skin);
     ui.playerNameInput.value = playerName;
     ui.joinName.value = playerName;
-    renderSkinPickers();
+    renderCharPickers();
+    renderMetaBar();
     ui.playerNameInput.addEventListener('input', () => {
       playerName = sanitizeName(ui.playerNameInput.value);
       ui.joinName.value = playerName;

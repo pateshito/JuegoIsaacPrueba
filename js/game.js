@@ -42,6 +42,13 @@
     fxQueue: [],
     fxSend: [],
     stats: { kills: 0, rooms: 0 },
+    // ---- mejoras y recursos COMPARTIDOS por todo el equipo ----
+    items: [],           // lista compartida de objetos (todos la comparten)
+    coins: 0,            // monedero común
+    keys: 0,             // llavero común
+    theme: null,         // tema visual/diseño del piso
+    revealed: false,     // el mapa del piso está revelado (habilidad de Caín)
+    eventFlash: 0,
     message: '', messageTimer: 0,
     bigMessage: null,
     hintTimer: 0,
@@ -64,6 +71,70 @@
   // Utilidades internas
   // ---------------------------------------------------------
   const alivePlayers = () => G.players.filter((p) => !p.dead);
+
+  // ---------------------------------------------------------
+  // Recursos y mejoras COMPARTIDAS
+  // ---------------------------------------------------------
+  const isCoop = () => G.players.length > 1;
+
+  function countItem(id) {
+    let n = 0;
+    for (const it of G.items) if (it === id) n++;
+    return n;
+  }
+
+  // Reanimaciones disponibles al empezar un piso:
+  // 1 base + una por Cordero pascual + una por Pluma de fénix.
+  function reviveBase() {
+    return 1 + countItem('extra_life') + countItem('phoenix');
+  }
+
+  // Refresca las reanimaciones por piso. En solitario NO se reponen: solo
+  // se concede la vida inicial (revivir una vez y morir).
+  function refreshRevives() {
+    for (const p of G.players) {
+      if (isCoop()) p.revives = Math.max(p.revives, reviveBase());
+      else if (p.revives < 0) p.revives = 0;
+    }
+  }
+
+  // El monedero y el llavero son del equipo: se reflejan en cada jugador
+  // para que la red y el HUD sigan mostrando lo mismo.
+  function syncPool() {
+    for (const p of G.players) { p.coins = G.coins; p.keys = G.keys; }
+  }
+
+  function addCoins(n) {
+    G.coins = Math.max(0, G.coins + (n | 0));
+    syncPool();
+  }
+  function spendCoins(n) {
+    if (G.coins < n) return false;
+    G.coins -= n;
+    syncPool();
+    return true;
+  }
+  function addKeys(n) {
+    G.keys = Math.max(0, G.keys + (n | 0));
+    syncPool();
+  }
+  function spendKey() {
+    if (G.keys <= 0) return false;
+    G.keys--;
+    syncPool();
+    return true;
+  }
+
+  // Aplica un objeto a TODO el equipo (las mejoras son grupales).
+  function giveItemToAll(itemId) {
+    G.items.push(itemId);
+    for (const p of G.players) p.items = G.items;
+    for (const p of G.players) E.recomputeStats(p);
+    // Los objetos que dan reanimaciones las conceden al instante.
+    if (itemId === 'extra_life' || itemId === 'phoenix') {
+      for (const p of G.players) p.revives = Math.max(p.revives, reviveBase());
+    }
+  }
 
   function nearestPlayer(x, y) {
     let best = null, bd = Infinity;
@@ -164,13 +235,13 @@
     if (!isFinite(p.walkPhase)) p.walkPhase = 0;
     if (!isFinite(p.aim.x)) p.aim.x = 0;
     if (!isFinite(p.aim.y)) p.aim.y = 1;
-    const sp = num(p.speed, 192);
+    const sp = num(p.speed, 192) + ((p.buff && p.buff.spdT > 0) ? p.buff.spd : 0);
     p.vx = (input.mx || 0) * sp;
     p.vy = (input.my || 0) * sp;
     p.x += p.vx * dt;
     p.y += p.vy * dt;
     clampPlayerToRoom(p);
-    resolveObstacles(p);
+    if (!p.flying) resolveObstacles(p);
 
     const moving = !!(input.mx || input.my);
     p.walkPhase += dt * (moving ? 9 : 2.4);
@@ -192,7 +263,7 @@
     const base = Math.atan2(p.aim.y, p.aim.x);
     const n = 1 + p.extraShots;
     const big = !!charged;
-    const dmg = p.damage + pr.bonusDamage;
+    const dmg = p.damage + pr.bonusDamage + ((p.buff && p.buff.dmgT > 0) ? p.buff.dmg : 0);
     for (let i = 0; i < n; i++) {
       const spread = n === 1 ? 0 : (i - (n - 1) / 2) * 0.2;
       const a = base + spread;
@@ -232,8 +303,10 @@
     Sfx.play('shoot');
   }
 
-  function enemyShoot(e, target) {
-    const a = Math.atan2(target.y - e.y, target.x - e.x);
+  function enemyShoot(e, target, aim) {
+    const tx = aim ? aim.x : target.x;
+    const ty = aim ? aim.y : target.y;
+    const a = Math.atan2(ty - e.y, tx - e.x);
     G.bullets.push(E.createBullet(
       e.x + Math.cos(a) * e.r, e.y + Math.sin(a) * e.r,
       Math.cos(a) * e.shotSpeed, Math.sin(a) * e.shotSpeed,
@@ -247,7 +320,8 @@
   // ---------------------------------------------------------
   function hurtPlayer(p, dmg, fromX, fromY) {
     if (p.dead || p.invuln > 0) return;
-    dmg = Math.max(1, dmg - (p.armor || 0));
+    // Resistencia nerfeada: como mucho 2 puntos y mínimo 1 de daño.
+    dmg = Math.max(1, dmg - Math.min(p.armor || 0, 2));
 
     // Escudo: absorbe un golpe entero y se rompe.
     if (p.shield > 0) {
@@ -272,6 +346,13 @@
       const d = Math.hypot(p.x - fromX, p.y - fromY) || 1;
       p.x += ((p.x - fromX) / d) * 14;
       p.y += ((p.y - fromY) / d) * 14;
+    }
+
+    // Sansón: al recibir daño entra en furia (+daño temporal).
+    if (p.rageOnHurt) {
+      const b = p.buff || (p.buff = { dmg: 0, dmgT: 0, fire: 0, fireT: 0, spd: 0, spdT: 0, fam: 0, famT: 0 });
+      b.dmg = Math.max(b.dmg, 1.4);
+      b.dmgT = Math.max(b.dmgT, 6);
     }
 
     // Corona de espinas: devuelve daño a quien te toca.
@@ -318,6 +399,7 @@
     const i = G.enemies.indexOf(e);
     if (i >= 0) G.enemies.splice(i, 1);
     G.stats.kills++;
+    if (global.Meta) global.Meta.killEnemy();
     Sfx.play('kill');
     addShake(e.isBoss ? 1.0 : 0.16);
     G.fxQueue.push({ k: 'boom', x: e.x, y: e.y, c: e.color, n: e.isBoss ? 40 : 12 });
@@ -331,22 +413,24 @@
       }
     }
 
-    // botín
-    const luck = bestLuck();
-    if (Math.random() < 0.15 + luck * 0.05) dropPickup('heart', e.x, e.y);
-    else if (Math.random() < 0.28 + luck * 0.08) dropPickup('coin', e.x, e.y);
-    if (Math.random() < 0.085 + luck * 0.03) dropPickup('key', e.x, e.y);
+    // botín: los enemigos ya NO sueltan objetos. La recompensa llega al
+    // despejar la habitación (ver checkRoomCleared / roomClearReward).
 
-    // robo de vida (Colmillo de vampiro): cura a quien lo lleve
+    // robo de vida (Colmillo de vampiro): nerfeado, cura medio corazón cada
+    // dos enemigos (se acumula).
     for (const p of G.players) {
       const pr = E.profile(p);
       if (pr.lifestealHeal > 0 && !p.dead && p.hp < p.maxHp) {
-        p.hp = Math.min(p.maxHp, p.hp + pr.lifestealHeal);
-        G.fxQueue.push({ k: 'puff', x: p.x, y: p.y, c: '#ff8fa8', n: 5 });
+        p._lifeAcc = (p._lifeAcc || 0) + pr.lifestealHeal * 0.5;
+        while (p._lifeAcc >= 1 && p.hp < p.maxHp) {
+          p._lifeAcc -= 1;
+          p.hp = Math.min(p.maxHp, p.hp + 1);
+          G.fxQueue.push({ k: 'puff', x: p.x, y: p.y, c: '#ff8fa8', n: 5 });
+        }
       }
     }
 
-    if (e.isBoss) onBossDefeated();
+    if (e.isBoss) { if (global.Meta) global.Meta.bossKilled(e.type); onBossDefeated(); }
   }
 
   function bestLuck() {
@@ -355,9 +439,90 @@
     return l;
   }
 
-  function dropPickup(type, x, y) {
+  // Deja caer un recogible. Por defecto aparece "bloqueado" ~0.9 s para que
+  // no se recoja en el mismo instante en que se genera.
+  function dropPickup(type, x, y, lock) {
     if (!G.room.pickups) G.room.pickups = [];
-    G.room.pickups.push(E.createPickup(type, x, y));
+    G.room.pickups.push(E.createPickup(type, x, y, { lock: lock == null ? 0.9 : lock }));
+  }
+
+  // ---------------------------------------------------------
+  // Recompensa al despejar una habitación (sustituye al botín de enemigos)
+  // ---------------------------------------------------------
+  function roomClearReward(room) {
+    const luck = bestLuck();
+    const n = room.enemyCount || 0;
+    // monedas según cuántos enemigos había (1..5)
+    const coins = Math.max(1, Math.min(5, Math.round(n * 0.4) + (G.floorNum >= 3 ? 1 : 0)));
+    for (let i = 0; i < coins; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const rr = 16 + Math.random() * 30;
+      dropPickup('coin', C.CX + Math.cos(a) * rr, C.CY + Math.sin(a) * rr);
+    }
+    // corazón si el equipo va malherido, o por azar (curaciones nerfeadas)
+    const hurt = G.players.some((p) => !p.dead && p.hp <= p.maxHp * 0.4);
+    if (hurt || Math.random() < 0.28) {
+      dropPickup('heart', C.CX + (Math.random() - 0.5) * 44, C.CY + 26);
+    }
+    // llave ocasional
+    if (Math.random() < 0.12 + luck * 0.02) {
+      dropPickup('key', C.CX - 32, C.CY + 30);
+    }
+    // y a veces aparece un cofre
+    maybeChest(room);
+  }
+
+  // Cofres: aparecen al finalizar una sala. Pueden ser gratis o costar
+  // llaves. Los gratis dan consumibles; los cerrados dan un objeto.
+  function maybeChest(room) {
+    if (room.type !== 'normal') return;
+    let chance = 0.22 + bestLuck() * 0.02;
+    if (Math.random() > chance) return;
+    const locked = Math.random() < (0.35 + Math.min(0.25, (G.floorNum - 1) * 0.03));
+    const keys = locked ? 1 : 0;
+    const x = C.CX + (Math.random() < 0.5 ? -78 : 78);
+    const y = C.CY - 46;
+    if (!room.pickups) room.pickups = [];
+    room.pickups.push(E.createPickup('chest', x, y, { keys, pop: false, lock: 0.9 }));
+    setMessage(locked ? '¡Un cofre cerrado! Abre con una llave 🔑' : '¡Apareció un cofre!', 1.9);
+  }
+
+  // Intenta abrir un cofre. Devuelve true si se abrió (y hay que quitarlo).
+  function openChest(p, chest) {
+    const cost = chest.keys || 0;
+    if (cost > 0 && G.keys < cost) {
+      if (!p._keyWarn || G.time - p._keyWarn > 1.5) {
+        p._keyWarn = G.time;
+        setMessage('Necesitas ' + cost + ' llave' + (cost > 1 ? 's' : '') + ' 🔑', 1.6);
+      }
+      return false;
+    }
+    if (cost > 0) spendKey();
+    Sfx.play(cost > 0 ? 'unlock' : 'pickup');
+    addShake(0.22);
+    G.fxQueue.push({ k: 'boom', x: chest.x, y: chest.y, c: '#ffd166', n: 20 });
+
+    const luck = bestLuck();
+    if (cost > 0) {
+      // cofre cerrado: garantiza un objeto para el equipo + monedas
+      giveItemToAll(pickPoolItem('treasure', ownedItems()));
+      const n = 2 + (Math.random() < 0.5 ? 1 : 0);
+      for (let i = 0; i < n; i++) {
+        dropPickup('coin', chest.x + (Math.random() - 0.5) * 64, chest.y + (Math.random() - 0.5) * 52);
+      }
+      if (Math.random() < 0.25) dropPickup('key', chest.x - 12, chest.y + 22);
+      setMessage('¡Cofre abierto! Objeto para el equipo', 2.0);
+    } else {
+      // cofre gratis: consumibles
+      const n = 3 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < n; i++) {
+        dropPickup('coin', chest.x + (Math.random() - 0.5) * 64, chest.y + (Math.random() - 0.5) * 52);
+      }
+      if (Math.random() < 0.35) dropPickup('heart', chest.x + 16, chest.y);
+      if (Math.random() < 0.14 + luck * 0.02) dropPickup('key', chest.x - 16, chest.y + 10);
+      setMessage('¡Cofre abierto!', 1.6);
+    }
+    return true;
   }
 
   // ---------------------------------------------------------
@@ -391,7 +556,9 @@
   function spawnEnemies(room, entrySide) {
     const rng = Utils.mulberry32(Utils.hash(room.key + '@' + G.seed + '@' + G.floorNum));
     const plan = Dungeon.enemyPlan(room, G.floorNum, G.seed);
+    let total = 0;
     for (const entry of plan) {
+      total += entry.count;
       for (let i = 0; i < entry.count; i++) {
         let pos;
         const tdef = E.ENEMY_TYPES[entry.type] || {};
@@ -403,6 +570,7 @@
         G.enemies.push(E.createEnemy(entry.type, pos.x, pos.y, G.floorNum));
       }
     }
+    room.enemyCount = total;
     if (plan.length) Sfx.play('door');
   }
 
@@ -418,7 +586,9 @@
     if (!room.spawned) {
       room.spawned = true;
       if (room.type === 'treasure') {
-        room.pedestals.push(E.createPedestal(pickPoolItem('treasure', ownedItems()), C.CX, C.CY));
+        room.pedestals.push(E.createPedestal(pickPoolItem('treasure', ownedItems()), C.CX, C.CY, 0, 0.9));
+        // las salas del tesoro traen además un cofre gratis
+        room.pickups.push(E.createPickup('chest', C.CX + 120, C.CY, { keys: 0, pop: false, lock: 0.9 }));
       } else if (room.type === 'shop') {
         const firstId = pickPoolItem('shop', ownedItems());
         room.pedestals.push(E.createPedestal(firstId, C.CX - 120, C.CY, 12));
@@ -435,7 +605,7 @@
 
   function ownedItems() {
     const s = new Set();
-    for (const p of G.players) for (const it of p.items) s.add(it);
+    for (const it of G.items) s.add(it);
     return Array.from(s);
   }
 
@@ -516,32 +686,81 @@
 
     // recompensa del jefe: objeto (pool de jefe) + una llave + trampilla
     if (room.type === 'boss') {
-      room.pedestals.push(E.createPedestal(pickPoolItem('boss', ownedItems()), C.CX - 90, C.CY));
-      room.pickups.push(E.createPickup('key', C.CX - 90, C.CY + 70, { pop: false }));
+      // Todo aparece "sellado" 2 s: primero sale un contador y luego se puede coger.
+      room.pedestals.push(E.createPedestal(pickPoolItem('boss', ownedItems()), C.CX - 90, C.CY, 0, 2));
+      room.pickups.push(E.createPickup('key', C.CX - 90, C.CY + 70, { pop: false, lock: 2 }));
       const last = G.floorNum >= C.FLOORS;
-      room.pickups.push(E.createPickup('trapdoor', C.CX + 80, C.CY, { pop: false }));
-      if (last) setMessage('¡Trampilla final!', 2.4);
-    } else if (room.type === 'normal') {
-      const hurt = G.players.some((p) => p.hp <= p.maxHp * 0.45);
-      if (hurt || Math.random() < 0.45) {
-        const kind = (hurt && Math.random() < 0.75) ? 'heart' : (Math.random() < 0.5 ? 'heart' : 'coin');
-        room.pickups.push(E.createPickup(kind, C.CX, C.CY, { pop: true }));
+      room.pickups.push(E.createPickup('trapdoor', C.CX + 80, C.CY, { pop: false, lock: 2 }));
+      setMessage('Recompensa sellada: espera 2 s', 2);
+      if (last) setMessage('¡Trampilla final!', 2.4);    } else if (room.type === 'normal') {
+      roomClearReward(room);
+    }
+
+    // Limpiar una sala NO resucita a los caídos: en cooperativo cada
+    // jugador puede revivir una vez por piso (o muere, en solitario).
+
+    // Habilidad activa: limpiar una sala reduce 15 s de recarga.
+    for (const p of G.players) {
+      if (p.abCd > 0) p.abCd = Math.max(0, p.abCd - 15);
+    }
+
+    // Ángel (pasiva, nerfeada): 50% de curar medio corazón al equipo.
+    if (G.players.some((p) => p.allyHeal) && Math.random() < 0.5) {
+      for (const p of G.players) {
+        if (p.dead || p.hp >= p.maxHp) continue;
+        p.hp = Math.min(p.maxHp, p.hp + 1);
+        G.fxQueue.push({ k: 'puff', x: p.x, y: p.y, c: '#dff1ff', n: 6 });
       }
     }
 
-    // revivir jugadores caídos al limpiar la sala
-    let revived = false;
+    // Magdalena (pasiva): al limpiar, 15% de curarse 1 corazón.
     for (const p of G.players) {
-      if (p.dead) {
-        p.dead = false;
-        p.hp = Math.max(2, Math.floor(p.maxHp / 4));
-        p.invuln = 2;
-        p.x = C.CX;
-        p.y = C.CY + 24;
-        revived = true;
+      if (p.dead || p.hp >= p.maxHp || !(p.roomHeal > 0)) continue;
+      if (Math.random() < p.roomHeal) {
+        p.hp = Math.min(p.maxHp, p.hp + 2);
+        G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#ff8fb0', n: 12 });
+        setMessage(p.name + ': ¡Vitalidad! +1 corazón', 1.6);
+        Sfx.play('heart');
       }
     }
-    if (revived) setMessage('Un jugador ha vuelto a la vida', 2.2);
+
+    // Evento raro al azar (muy poco probable): recompensa de progreso.
+    maybeRandomEvent();
+  }
+
+  // ---------------------------------------------------------
+  // Eventos raros: en contadas ocasiones aparece un cofre dorado con
+  // monedas de progreso y opciones de compra desbloqueadas.
+  // ---------------------------------------------------------
+  function maybeRandomEvent() {
+    if (Math.random() > 0.035) return;   // ~3.5% por sala
+    const room = G.room;
+    if (!room || room.type === 'start') return;
+    if (!room.pickups) room.pickups = [];
+    if (room.pickups.some((k) => k.type === 'relic')) return;
+    room.pickups.push(E.createPickup('relic', C.CX, C.CY, { pop: true }));
+    G.eventFlash = 1;
+    bigMsg('✨ SUCESO EXTRAÑO', 'Un cofre de progreso apareció', 2.6);
+    Sfx.play('boss');
+  }
+
+  function applyRelic(p) {
+    const bonus = 90 + G.floorNum * 12 + G.stats.kills;
+    if (global.Meta) {
+      global.Meta.addCoins(bonus);
+      global.Meta.recordEvent();
+      // Desbloquea la compra de un personaje oculto (si queda alguno).
+      const hidden = (global.Characters ? Characters.LIST : []).filter((c) => c.hidden && !global.Meta.isShopUnlocked(c.id));
+      if (hidden.length) {
+        const pick = hidden[Math.floor(Math.random() * hidden.length)];
+        global.Meta.unlockShop(pick.id);
+        setMessage('¡Se ha desbloqueado la compra de ' + pick.name + '!', 3.2);
+      } else {
+        setMessage('+' + bonus + ' monedas de progreso', 2.6);
+      }
+    }
+    G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#ffd166', n: 30 });
+    addShake(0.3);
   }
 
   function onBossDefeated() {
@@ -559,6 +778,8 @@
     G.floorNum++;
     G.seed = (G.seed * 1664525 + 1013904223) >>> 0;
     G.dungeon = Dungeon.generate(G.seed, G.floorNum);
+    G.theme = (Dungeon.theme ? Dungeon.theme(G.floorNum) : null);
+    G.revealed = false;
     const start = G.dungeon.rooms[G.dungeon.startKey];
     G.gx = start.gx; G.gy = start.gy;
     G.enemies.length = 0;
@@ -568,10 +789,13 @@
     placePlayers(null, true);
     for (const p of G.players) {
       p.invuln = 1.5;
-      if (!p.dead) p.hp = Math.min(p.maxHp, p.hp + 2);
+      if (!p.dead) p.hp = Math.min(p.maxHp, p.hp + 1);
+      // Reponer reanimaciones por piso (solo cooperativo).
+      if (isCoop()) p.revives = Math.max(p.revives, reviveBase());
     }
+    if (global.Meta) global.Meta.reachFloor(G.floorNum);
     G.transition = 0.4;
-    bigMsg('PISO ' + G.floorNum, 'Todo se vuelve más peligroso', 3);
+    bigMsg('PISO ' + G.floorNum, G.theme ? G.theme.name : 'Todo se vuelve más peligroso', 3);
     Sfx.play('door');
   }
 
@@ -593,8 +817,8 @@
   function tryUnlockDoor(p, inp) {
     const dir = lockedDoorNear(p, inp);
     if (!dir) return false;
-    if (p.keys > 0) {
-      p.keys--;
+    if (G.keys > 0) {
+      spendKey();
       const room = G.room;
       room.locks[dir] = false;
       const d = DELTA[dir];
@@ -603,7 +827,7 @@
       Sfx.play('unlock');
       addShake(0.16);
       G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#ffd166', n: 16 });
-      setMessage('¡Puerta desbloqueada! (' + p.keys + ' llaves)', 1.8);
+      setMessage('¡Puerta desbloqueada! (' + G.keys + ' llaves)', 1.8);
       return true;
     }
     if (!p._keyWarn || G.time - p._keyWarn > 1.5) {
@@ -613,10 +837,178 @@
     return false;
   }
 
+  // ---------------------------------------------------------
+  // HABILIDADES ACTIVAS
+  // Cada personaje tiene una activa con cargas. Se recargan con el tiempo
+  // y limpiar una habitación quita 15 s. Cuanto mejor es, más tarda.
+  // ---------------------------------------------------------
+  function spawnActiveBullet(p, x, y, vx, vy, o) {
+    o = o || {};
+    G.bullets.push(E.createBullet(x, y, vx, vy, Object.assign({
+      friendly: true, owner: p.id, color: '#cfe0ff', dmg: p.damage, r: 7, life: 1.4,
+    }, o)));
+  }
+
+  const ACTIVES = {
+    // Ráfaga circular de lágrimas.
+    tears(p) {
+      const n = 12;
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2 + G.time;
+        spawnActiveBullet(p, p.x + Math.cos(a) * 16, p.y + Math.sin(a) * 16,
+          Math.cos(a) * p.bulletSpeed, Math.sin(a) * p.bulletSpeed,
+          { dmg: p.damage * 1.1, r: p.bulletSize, color: '#dff1ff', life: p.range });
+      }
+    },
+    // Curación + inmunidad (nerfeada: 1 corazón).
+    heal(p) {
+      p.hp = Math.min(p.maxHp, p.hp + 2);
+      p.invuln = Math.max(p.invuln, 1.6);
+      G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#ff8fb0', n: 24 });
+    },
+    // Revela todo el mapa del piso.
+    reveal(p) { G.revealed = true; setMessage('Mapa del piso revelado', 2.2); },
+    // Daga perforante devastadora.
+    dagger(p) {
+      const a = Math.atan2(p.aim.y, p.aim.x);
+      spawnActiveBullet(p, p.x + Math.cos(a) * 18, p.y + Math.sin(a) * 18,
+        Math.cos(a) * p.bulletSpeed * 1.2, Math.sin(a) * p.bulletSpeed * 1.2,
+        { dmg: p.damage * 3.2, r: 11, color: '#ffd9e0', life: 1.8, pierce: true, explode: 20 });
+    },
+    // Explosión de daño en la dirección apuntada.
+    blast(p) {
+      const a = Math.atan2(p.aim.y, p.aim.x);
+      const x = p.x + Math.cos(a) * 70, y = p.y + Math.sin(a) * 70;
+      explodeAt(x, y, 72, 6 + p.damage, { c: '#ff9a3c', self: false });
+      addShake(0.3);
+    },
+    // Cambia el objeto del pedestal más cercano.
+    reroll(p) {
+      const room = G.room;
+      if (!room || !room.pedestals) return;
+      let best = null, bd = 1e9;
+      for (const d of room.pedestals) {
+        if (d.taken) continue;
+        const dd = Utils.dist2(p.x, p.y, d.x, d.y);
+        if (dd < bd) { bd = dd; best = d; }
+      }
+      if (!best) { setMessage('No hay ningún pedestal cerca', 1.6); return; }
+      best.itemId = pickPoolItem('treasure', ownedItems());
+      G.fxQueue.push({ k: 'boom', x: best.x, y: best.y, c: '#a6f28a', n: 20 });
+      setMessage('¡Objeto reciclado!', 2);
+    },
+    // Intangible: inmune y algo más rápido.
+    phase(p) {
+      p.invuln = Math.max(p.invuln, 3);
+      const b = p.buff || (p.buff = { dmg: 0, dmgT: 0, fire: 0, fireT: 0, spd: 0, spdT: 0, fam: 0, famT: 0 });
+      b.spd = Math.max(b.spd, 70); b.spdT = Math.max(b.spdT, 3);
+      G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#dff1ff', n: 22 });
+    },
+    // Doble cadencia temporal.
+    overclock(p) {
+      const b = p.buff || (p.buff = { dmg: 0, dmgT: 0, fire: 0, fireT: 0, spd: 0, spdT: 0, fam: 0, famT: 0 });
+      b.fire = Math.max(b.fire, p.fireRate + 0.6); b.fireT = Math.max(b.fireT, 4);
+      G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#ffd166', n: 20 });
+    },
+    // Sacrifica 1 punto de vida por daño temporal.
+    pact(p) {
+      p.hp = Math.max(1, p.hp - 1);
+      const b = p.buff || (p.buff = { dmg: 0, dmgT: 0, fire: 0, fireT: 0, spd: 0, spdT: 0, fam: 0, famT: 0 });
+      b.dmg = Math.max(b.dmg, 2.6); b.dmgT = Math.max(b.dmgT, 8);
+      G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#ff6b8a', n: 22 });
+    },
+    // Escudo para todo el equipo.
+    bless(p) {
+      for (const q of G.players) { if (!q.dead) q.shield = Math.max(q.shield, 1); }
+      G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#bfe3ff', n: 24 });
+      setMessage('¡Bendición para el equipo!', 2);
+    },
+    // Furia: daño y velocidad temporales.
+    fury(p) {
+      const b = p.buff || (p.buff = { dmg: 0, dmgT: 0, fire: 0, fireT: 0, spd: 0, spdT: 0, fam: 0, famT: 0 });
+      b.dmg = Math.max(b.dmg, 1.8); b.dmgT = Math.max(b.dmgT, 6);
+      b.spd = Math.max(b.spd, 50); b.spdT = Math.max(b.spdT, 6);
+      G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#ff9a3c', n: 22 });
+    },
+    // Moscas familiares temporales.
+    summon(p) {
+      const b = p.buff || (p.buff = { dmg: 0, dmgT: 0, fire: 0, fireT: 0, spd: 0, spdT: 0, fam: 0, famT: 0 });
+      b.fam = Math.max(b.fam, 2); b.famT = Math.max(b.famT, 10);
+      G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#b58cff', n: 22 });
+    },
+    // Siembra monedas y cura.
+    wealth(p) {
+      if (!G.room) return;
+      if (!G.room.pickups) G.room.pickups = [];
+      for (let i = 0; i < 5; i++) {
+        const a = Math.random() * Math.PI * 2, r = 30 + Math.random() * 50;
+        G.room.pickups.push(E.createPickup('coin', p.x + Math.cos(a) * r, p.y + Math.sin(a) * r));
+      }
+      G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#ffd166', n: 20 });
+    },
+  };
+
+  function updateAbility(p, dt) {
+    if (!p.abMax) return;
+    if (p.abCharges >= p.abMax) { p.abCd = p.abCdMax; return; }
+    p.abCd = num(p.abCd, 0) - dt;
+    let guard = 0;
+    while (p.abCd <= 0 && p.abCharges < p.abMax && guard++ < 8) {
+      p.abCharges++;
+      if (p.abCharges >= p.abMax) { p.abCd = p.abCdMax; break; }
+      p.abCd += p.abCdMax;
+    }
+    if (p.abCd < 0) p.abCd = 0;
+  }
+
+  function updateBuffs(p, dt) {
+    const b = p.buff;
+    if (!b) return;
+    if (b.dmgT > 0) { b.dmgT -= dt; if (b.dmgT <= 0) { b.dmg = 0; b.dmgT = 0; } }
+    if (b.fireT > 0) { b.fireT -= dt; if (b.fireT <= 0) { b.fire = 0; b.fireT = 0; } }
+    if (b.spdT > 0) { b.spdT -= dt; if (b.spdT <= 0) { b.spd = 0; b.spdT = 0; } }
+    if (b.famT > 0) { b.famT -= dt; if (b.famT <= 0) { b.fam = 0; b.famT = 0; } }
+  }
+
+  function tryUseAbility(p) {
+    if (p.dead || !p.abMax) return false;
+    if (p.abCharges <= 0) {
+      if (!p._abWarn || G.time - p._abWarn > 1.2) {
+        p._abWarn = G.time;
+        setMessage('Habilidad recargándose (' + Math.ceil(p.abCd) + ' s)', 1.4);
+      }
+      return false;
+    }
+    const ch = E.charOf({ char: p.charId });
+    const act = ch && ch.active;
+    if (!act) return false;
+    const wasFull = p.abCharges >= p.abMax;
+    p.abCharges--;
+    if (wasFull) p.abCd = p.abCdMax;
+    const fn = ACTIVES[act.id];
+    if (fn) { try { fn(p); } catch (e) { /* activa sin efecto */ } }
+    Sfx.play('pickup');
+    G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#e8f0ff', n: 16 });
+    setMessage(p.name + ': ' + act.name, 1.6);
+    return true;
+  }
+
   function updatePlayer(p, dt) {
+    updateBuffs(p, dt);
+    updateAbility(p, dt);
     if (p.invuln > 0) p.invuln -= dt;
     if (p.hurtFlash > 0) p.hurtFlash -= dt;
     if (p.dead) return;
+
+    // Robot (pasiva): recupera un escudo con el tiempo si no tiene ninguno.
+    if (p.shieldRegen && p.shield < 1) {
+      p._shieldAcc = (p._shieldAcc || 0) + dt;
+      if (p._shieldAcc >= 18) {
+        p._shieldAcc = 0;
+        p.shield = Math.min(1, p.shield + 1);
+        G.fxQueue.push({ k: 'puff', x: p.x, y: p.y, c: '#8fd3ff', n: 8 });
+      }
+    }
 
     // regeneración (Vendaje): acumula medios corazones
     if (p.regen > 0 && p.hp < p.maxHp) {
@@ -628,15 +1020,19 @@
       }
     }
 
-    const inp = p.input || { mx: 0, my: 0, sx: 0, sy: 0, fire: false };
+    const inp = p.input || { mx: 0, my: 0, sx: 0, sy: 0, fire: false, use: false };
     movePlayer(p, inp, dt);
+
+    // Habilidad activa (tecla propia de cada esquema).
+    if (inp.use) tryUseAbility(p);
 
     p.shootCd -= dt;
     p.chargeT = (p.chargeT || 0) + dt;   // tiempo sin disparar (Golpe cargado)
     if (inp.fire && (inp.sx || inp.sy) && p.shootCd <= 0) {
       const pr = E.profile(p);
       const charged = pr.charger && p.chargeT >= pr.chargeTime;
-      p.shootCd = 1 / p.fireRate;
+      const fr = Math.max(0.4, p.fireRate + ((p.buff && p.buff.fireT > 0) ? p.buff.fire : 0));
+      p.shootCd = 1 / fr;
       p.chargeT = 0;
       playerShoot(p, charged);
     }
@@ -666,21 +1062,26 @@
     if (room.pickups && room.pickups.length) {
       for (let i = room.pickups.length - 1; i >= 0; i--) {
         const k = room.pickups[i];
+        if (k.lock > 0) continue;   // aún sellado tras aparecer
         if (Utils.dist(p.x, p.y, k.x, k.y) > p.r + k.r + 4) continue;
         if (k.type === 'trapdoor') {
           room.pickups.splice(i, 1);
           nextFloor();
           return;
         }
+        if (k.type === 'chest') {
+          if (openChest(p, k)) room.pickups.splice(i, 1);
+          continue;
+        }
         if (k.price > 0) {
-          if (p.coins < k.price) {
+          if (G.coins < k.price) {
             if (!p._coinWarn || G.time - p._coinWarn > 1.5) {
               p._coinWarn = G.time;
-              setMessage('Necesitas ' + k.price + ' monedas', 1.6);
+              setMessage('Necesitas ' + k.price + ' monedas (compartidas)', 1.6);
             }
             continue;
           }
-          p.coins -= k.price;
+          spendCoins(k.price);
           room.pickups.splice(i, 1);
           applyPickup(p, k.type);
           setMessage(p.name + ' compró por ' + k.price + ' monedas', 1.8);
@@ -695,17 +1096,18 @@
       for (let i = room.pedestals.length - 1; i >= 0; i--) {
         const ped = room.pedestals[i];
         if (ped.taken) continue;
+        if (ped.lock > 0) continue;   // aún sellado tras aparecer
         if (Utils.dist(p.x, p.y, ped.x, ped.y) > p.r + 24) continue;
         if (ped.price > 0) {
-          if (p.coins >= ped.price) {
-            p.coins -= ped.price;
+          if (G.coins >= ped.price) {
+            spendCoins(ped.price);
             giveItem(p, ped.itemId);
             ped.taken = true;
             Sfx.play('pickup');
-            setMessage(p.name + ' compró ' + E.itemById(ped.itemId).name, 2);
+            setMessage(p.name + ' compró ' + E.itemById(ped.itemId).name + ' para todos', 2);
           } else if (!p._coinWarn || G.time - p._coinWarn > 1.5) {
             p._coinWarn = G.time;
-            setMessage('Necesitas ' + ped.price + ' monedas', 1.6);
+            setMessage('Necesitas ' + ped.price + ' monedas (compartidas)', 1.6);
           }
         } else {
           giveItem(p, ped.itemId);
@@ -716,40 +1118,50 @@
   }
 
   function applyPickup(p, type) {
-    if (type === 'heart') {
-      if (p.hp < p.maxHp) { p.hp = Math.min(p.maxHp, p.hp + 2); Sfx.play('heart'); }
-      else { p.coins += 1; Sfx.play('coin'); }
-    } else if (type === 'halfheart') {
-      if (p.hp < p.maxHp) { p.hp = Math.min(p.maxHp, p.hp + 1); Sfx.play('heart'); }
-      else { p.coins += 1; Sfx.play('coin'); }
+    if (type === 'heart' || type === 'halfheart') {
+      // Los corazones son grupales: curan a todo el equipo (nerfeados).
+      const amt = 1;
+      let healed = false;
+      for (const q of G.players) {
+        if (q.dead || q.hp >= q.maxHp) continue;
+        q.hp = Math.min(q.maxHp, q.hp + amt);
+        healed = true;
+        G.fxQueue.push({ k: 'puff', x: q.x, y: q.y, c: '#ff8fb0', n: 5 });
+      }
+      if (healed) Sfx.play('heart');
+      else { addCoins(1); Sfx.play('coin'); }
     } else if (type === 'coin') {
-      p.coins += 1;
-      // Mano generosa: cada 4 monedas curan medio corazón.
+      addCoins(1);
+      // Mano generosa / Codicia: cada 6 monedas curan medio corazón.
       const pr = E.profile(p);
-      if (pr.greedHeal > 0) {
-        p._greedAcc = (p._greedAcc || 0) + pr.greedHeal;
-        if (p._greedAcc >= 4) {
-          p._greedAcc -= 4;
-          if (p.hp < p.maxHp) {
-            p.hp = Math.min(p.maxHp, p.hp + 1);
-            G.fxQueue.push({ k: 'puff', x: p.x, y: p.y, c: '#ffd166', n: 6 });
+      if (pr.greedHeal > 0 || p.coinsHeal) {
+        p._greedAcc = (p._greedAcc || 0) + 1;
+        if (p._greedAcc >= 6) {
+          p._greedAcc -= 6;
+          for (const q of G.players) {
+            if (q.dead || q.hp >= q.maxHp) continue;
+            q.hp = Math.min(q.maxHp, q.hp + 1);
           }
+          G.fxQueue.push({ k: 'puff', x: p.x, y: p.y, c: '#ffd166', n: 6 });
         }
       }
       Sfx.play('coin');
     } else if (type === 'key') {
-      p.keys += 1;
+      addKeys(1);
       Sfx.play('coin');
+    } else if (type === 'relic') {
+      applyRelic(p);
     }
   }
 
   function giveItem(p, itemId) {
     const item = E.itemById(itemId);
-    p.items.push(itemId);
-    item.apply(p);
+    // Las mejoras son COMPARTIDAS: se aplican a todo el equipo.
+    giveItemToAll(itemId);
+    if (global.Meta) global.Meta.recordItems(G.items.length);
     Sfx.play('pickup');
     addShake(0.18);
-    setMessage('¡' + item.name + '! ' + item.desc, 3);
+    setMessage('¡' + item.name + '! para todo el equipo · ' + item.desc, 3.2);
     G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: item.color, n: 18 });
   }
 
@@ -759,10 +1171,22 @@
   function moveEntity(e, dx, dy) {
     e.x += dx;
     e.y += dy;
-    resolveObstacles(e);
+    if (!e.phase) resolveObstacles(e); // los espectros atraviesan obstáculos
+  }
+
+  // Velocidad estimada del objetivo (para que la IA "lea" el movimiento).
+  function targetVel(e, target, dt) {
+    const vx = (e._tpx == null) ? 0 : (target.x - e._tpx) / Math.max(dt, 1e-3);
+    const vy = (e._tpy == null) ? 0 : (target.y - e._tpy) / Math.max(dt, 1e-3);
+    e._tpx = target.x; e._tpy = target.y;
+    const m = Math.hypot(vx, vy);
+    const cap = 420;
+    if (m > cap) return { x: (vx / m) * cap, y: (vy / m) * cap };
+    return { x: vx, y: vy };
   }
 
   function updateEnemy(e, dt) {
+    const rawDt = dt;
     e.anim += dt;
     if (e.flash > 0) e.flash -= dt;
     if (e.spawnT > 0) { e.spawnT -= dt; return; }
@@ -788,22 +1212,44 @@
     const d = Math.hypot(dx, dy) || 0.001;
     e.dir.x = dx / d; e.dir.y = dy / d;
 
+    // Lectura del movimiento del jugador (usada por varias IA).
+    const tv = targetVel(e, target, rawDt);
+    e._tv = tv;
+
     switch (e.ai) {
       case 'chase': {
+        // Persigue anticipando un poco el movimiento del jugador.
+        const lead = e.ghostly ? 0.16 : 0.1;
+        const tx = target.x + tv.x * lead, ty = target.y + tv.y * lead;
         const wob = e.wobble ? Math.sin(e.anim * 4.5) * 0.55 : 0;
-        const a = Math.atan2(dy, dx) + wob;
+        const a = Math.atan2(ty - e.y, tx - e.x) + wob;
         moveEntity(e, Math.cos(a) * e.speed * dt, Math.sin(a) * e.speed * dt);
         break;
       }
       case 'charge': {
-        if (e.chargeT > 0) {
+        // Embestida con aviso (se queda quieto apuntando) y posterior
+        // recuperación: si falla, queda vulnerable un instante.
+        if (e.chargeWind > 0) {
+          e.chargeWind -= dt;
+          if (e.chargeWind <= 0) {
+            // bloquea dirección hacia donde estará el jugador
+            const lead = Math.min(0.35, d / (e.speed * 1.85 || 1));
+            const a = Math.atan2(target.y + tv.y * lead - e.y, target.x + tv.x * lead - e.x);
+            e.dir.x = Math.cos(a); e.dir.y = Math.sin(a);
+            e.chargeT = 0.5;
+          }
+        } else if (e.chargeT > 0) {
           e.chargeT -= dt;
           moveEntity(e, e.dir.x * e.speed * 1.85 * dt, e.dir.y * e.speed * 1.85 * dt);
+          if (e.chargeT <= 0) e.chargeRecover = 0.45;
+        } else if (e.chargeRecover > 0) {
+          e.chargeRecover -= dt; // aturdido
         } else {
           e.chargeCd -= dt;
-          if (e.chargeCd <= 0 && d < 340) {
-            e.chargeT = 0.5;
-            e.chargeCd = 1.1 + Math.random() * 0.9;
+          if (e.chargeCd <= 0 && d < 340 && d > 90) {
+            e.chargeWind = 0.32;
+            e.chargeCd = 1.4 + Math.random() * 1.1;
+            Sfx.play('hit');
           } else {
             moveEntity(e, e.dir.x * e.speed * 0.22 * dt, e.dir.y * e.speed * 0.22 * dt);
           }
@@ -813,8 +1259,10 @@
       case 'hop': {
         e.hopCd -= dt;
         if (e.hopCd <= 0) {
-          e.hopCd = 0.7 + Math.random() * 0.5;
-          const a = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.7;
+          e.hopCd = 0.7 + Math.random() * 0.4;
+          const lead = Math.min(0.35, d / (e.speed * 2.3 || 1));
+          const a = Math.atan2(target.y + tv.y * lead - e.y, target.x + tv.x * lead - e.x)
+            + (Math.random() - 0.5) * 0.35;
           e.hopV.x = Math.cos(a) * e.speed * 2.3;
           e.hopV.y = Math.sin(a) * e.speed * 2.3;
         }
@@ -824,13 +1272,23 @@
         break;
       }
       case 'shoot': {
-        const want = 165;
+        // Mantiene la distancia, orbita/serpentea y dispara con puntería.
+        const want = e.keepDist || 165;
         const push = d > want + 40 ? 1 : (d < want - 40 ? -1 : 0);
         const px = -dy / d, py = dx / d;
-        const strafe = Math.sin(e.anim * 1.1) * 0.32;
-        moveEntity(e, (e.dir.x * push + px * strafe) * e.speed * dt, (e.dir.y * push + py * strafe) * e.speed * dt);
+        e.strafeDir = e.strafeDir || (Math.random() < 0.5 ? -1 : 1);
+        if (Math.random() < 0.012) e.strafeDir *= -1;
+        const strafe = e.strafeDir * (d < want ? 0.55 : 0.34);
+        moveEntity(e,
+          (e.dir.x * push + px * strafe) * e.speed * dt,
+          (e.dir.y * push + py * strafe) * e.speed * dt);
         e.shotCd -= dt;
-        if (e.shotCd <= 0 && d < 420) { e.shotCd = e.shotRate; enemyShoot(e, target); }
+        const range = e.shootRange || 420;
+        if (e.shotCd <= 0 && d < range) {
+          e.shotCd = e.shotRate;
+          const lead = Math.min(0.6, d / (e.shotSpeed || 200));
+          enemyShoot(e, target, { x: target.x + tv.x * lead, y: target.y + tv.y * lead });
+        }
         break;
       }
       case 'boss': bossAI(e, dt, target, d); break;
@@ -1193,7 +1651,7 @@
     const room = G.room;
     if (!room || !room.pickups) return;
     for (const k of room.pickups) {
-      if (k.type === 'trapdoor') continue;
+      if (k.type === 'trapdoor' || k.type === 'chest') continue;
       const d = Math.hypot(k.x - p.x, k.y - p.y);
       if (d > 6 && d < pr.magnetR) {
         const s = 170 * dt;
@@ -1398,6 +1856,19 @@
     }
   }
 
+  // Botín y premios recién aparecidos: durante `lock` segundos no se pueden
+  // coger ni abrir (con un contador visible encima si dura más de un segundo).
+  function updateSpawnLocks(dt) {
+    const room = G.room;
+    if (!room) return;
+    if (room.pickups) {
+      for (const k of room.pickups) if (k.lock > 0) k.lock = Math.max(0, k.lock - dt);
+    }
+    if (room.pedestals) {
+      for (const ped of room.pedestals) if (ped.lock > 0) ped.lock = Math.max(0, ped.lock - dt);
+    }
+  }
+
   // ---------------------------------------------------------
   // Paso de simulación (local y anfitrión)
   // ---------------------------------------------------------
@@ -1409,7 +1880,7 @@
       if (p.local) {
         p.input = Input.poll(p.scheme);
       } else {
-        p.input = G.remoteInputs[p.id] || { mx: 0, my: 0, sx: 0, sy: 0, fire: false };
+        p.input = G.remoteInputs[p.id] || { mx: 0, my: 0, sx: 0, sy: 0, fire: false, use: false };
       }
     }
 
@@ -1430,6 +1901,7 @@
     G.fxQueue.length = 0;
     updateParticles(dt);
     updateTimers(dt);
+    updateSpawnLocks(dt);
 
     // fin de partida
     if (!G.over && alivePlayers().length === 0) {
@@ -1463,7 +1935,7 @@
     G.inputAccum += dt;
     if (G.inputAccum >= INPUT_HZ) {
       G.inputAccum = 0;
-      Net.sendToHost({ t: 'input', i: [inp.mx, inp.my, inp.sx, inp.sy, inp.fire ? 1 : 0] });
+      Net.sendToHost({ t: 'input', i: [inp.mx, inp.my, inp.sx, inp.sy, inp.fire ? 1 : 0, inp.use ? 1 : 0] });
     }
 
     // predicción local
@@ -1502,6 +1974,7 @@
   // Serialización de estado
   // ---------------------------------------------------------
   function pser(p) {
+    const charIdx = (global.Characters ? Characters.indexOf(p.charId) : 0);
     return [
       p.id, p.name, p.color,
       n1(p.x), n1(p.y),
@@ -1514,6 +1987,7 @@
       p.slot, p.coins, p.items.join(','), p.ping || 0,
       num(p.skin, 0), (p.compass ? 1 : 0) | (p.hasMap ? 2 : 0),
       num(p.shield, 0), num(p.revives, 0), num(p.keys, 0),
+      charIdx, num(p.abCharges, 0), num(p.abMax, 0), n1(p.abCd),
     ];
   }
 
@@ -1531,7 +2005,7 @@
   }
 
   function kser(k) {
-    return [k.id, k.type, n1(k.x), n1(k.y), k.price || 0];
+    return [k.id, k.type, n1(k.x), n1(k.y), k.price || 0, k.keys || 0];
   }
 
   function dser(d) {
@@ -1559,6 +2033,9 @@
       ] : null,
       fx: G.fxSend,
       kills: G.stats.kills,
+      cs: G.coins,
+      ks: G.keys,
+      rv: G.revealed ? 1 : 0,
     };
     G.fxSend = [];
     return out;
@@ -1573,6 +2050,9 @@
       over: !!s.ov,
       victory: !!s.vi,
       kills: s.kills || 0,
+      coins: num(s.cs, 0),
+      keys: num(s.ks, 0),
+      revealed: !!s.rv,
       players: (s.p || []).map((a) => ({
         kind: 'player',
         id: a[0], name: a[1], color: a[2],
@@ -1588,6 +2068,8 @@
         armor: 0,
         compass: !!(a[19] & 1), hasMap: !!(a[19] & 2),
         shield: num(a[20]), revives: num(a[21]), keys: num(a[22]),
+        charId: (global.Characters && a[23] != null) ? Characters.LIST[Characters.normIndex(a[23])].id : 'isaac',
+        abCharges: num(a[24], 0), abMax: num(a[25], 0), abCd: num(a[26], 0),
         r: 12,
       })),
       enemies: (s.e || []).map((a) => ({
@@ -1603,8 +2085,9 @@
         r: num(a[5], 6), friendly: !!a[6], color: a[7],
       })),
       pickups: (s.k || []).map((a) => ({
-        kind: 'pickup', id: a[0], type: a[1], x: num(a[2]), y: num(a[3]), r: a[1] === 'trapdoor' ? 26 : 13,
-        price: a[4], bob: 0,
+        kind: 'pickup', id: a[0], type: a[1], x: num(a[2]), y: num(a[3]),
+        r: a[1] === 'trapdoor' ? 26 : (a[1] === 'chest' ? 16 : 13),
+        price: a[4], keys: a[5] || 0, bob: 0,
       })),
       pedestals: (s.d || []).map((a) => ({
         kind: 'pedestal', id: a[0], itemId: a[1], x: num(a[2]), y: num(a[3]), taken: !!a[4], price: a[5], bob: 0,
@@ -1657,6 +2140,7 @@
       G.seed = data.seed;
       G.floorNum = data.floorNum;
       G.dungeon = Dungeon.generate(G.seed, G.floorNum);
+      G.theme = (Dungeon.theme ? Dungeon.theme(G.floorNum) : null);
       G._bossAnnounced = false;
       if (floorChanged) {
         G.transition = 0.4;
@@ -1683,6 +2167,7 @@
 
     // stats
     if (data.kills > G.stats.kills) { G.stats.kills = data.kills; }
+    G.coins = data.coins; G.keys = data.keys; G.revealed = data.revealed;
 
     // estado del jugador local
     const mine = data.players.find((p) => p.id === G.localId);
@@ -1807,6 +2292,7 @@
         room: G.room, time: G.renderClock,
         players: [], enemies: [], bullets: [], pickups: [], pedestals: [], particles: G.particles,
         minimap: minimapData(), localId: G.localId,
+        items: G.items, coins: G.coins, keys: G.keys, revealed: G.revealed, theme: G.theme,
         message: 'Conectando…', messageTimer: 1, bigMessage: null, hintTimer: 0,
         shake: G.shake, transition: G.transition,
       };
@@ -1844,6 +2330,10 @@
             familiars: G.localPlayer.familiars, magnet: G.localPlayer.magnet, charger: G.localPlayer.charger,
             thorns: G.localPlayer.thorns, doubleTap: G.localPlayer.doubleTap, greed: G.localPlayer.greed,
             pushback: G.localPlayer.pushback, potency: G.localPlayer.potency, prism: G.localPlayer.prism,
+            coinsHeal: G.localPlayer.coinsHeal, flying: G.localPlayer.flying,
+            // personaje y habilidad activa
+            charId: G.localPlayer.charId,
+            abCharges: G.localPlayer.abCharges, abMax: G.localPlayer.abMax, abCd: G.localPlayer.abCd,
             items: G.localPlayer.items,
           });
         }
@@ -1857,6 +2347,7 @@
       players, enemies, bullets, pickups, pedestals,
       particles: G.particles,
       minimap: minimapData(), localId: G.localId,
+      items: G.items, coins: G.coins, keys: G.keys, revealed: G.revealed, theme: G.theme,
       message: G.message, messageTimer: G.messageTimer,
       bigMessage: G.bigMessage, hintTimer: G.hintTimer,
       shake: G.shake, transition: G.transition,
@@ -1864,23 +2355,32 @@
   }
 
   function view() {
-    if (G.mode === 'client') return clientView();
-    return {
-      mode: G.mode,
+    const base = {
+      items: G.items,
+      coins: G.coins,
+      keys: G.keys,
+      revealed: G.revealed,
+      theme: G.theme,
       floorNum: G.floorNum, gx: G.gx, gy: G.gy,
       room: G.room, time: G.renderClock,
-      players: G.players,
-      enemies: G.enemies,
-      bullets: G.bullets,
-      pickups: (G.room && G.room.pickups) || [],
-      pedestals: (G.room && G.room.pedestals) || [],
-      particles: G.particles,
       minimap: minimapData(),
       localId: G.localId,
       message: G.message, messageTimer: G.messageTimer,
       bigMessage: G.bigMessage, hintTimer: G.hintTimer,
       shake: G.shake, transition: G.transition,
     };
+    if (G.mode === 'client') {
+      return Object.assign(clientView(), base, { room: G.room, time: G.renderClock });
+    }
+    return Object.assign(base, {
+      mode: G.mode,
+      players: G.players,
+      enemies: G.enemies,
+      bullets: G.bullets,
+      pickups: (G.room && G.room.pickups) || [],
+      pedestals: (G.room && G.room.pedestals) || [],
+      particles: G.particles,
+    });
   }
 
   // ---------------------------------------------------------
@@ -1906,6 +2406,11 @@
     G.buffer = [];
     G.fxQueue = [];
     G.fxSend = [];
+    G.items = [];
+    G.coins = 0;
+    G.keys = 0;
+    G.revealed = false;
+    G.theme = (Dungeon.theme ? Dungeon.theme(G.floorNum) : null);
     G.remoteInputs = Object.create(null);
     G.localPlayers = [];
     G.localPlayer = null;
@@ -1929,6 +2434,7 @@
         name: lp.name,
         color: lp.color || E.skinColor(lp.skin || i),
         skin: lp.skin != null ? lp.skin : i,
+        char: lp.char,
         slot: lp.slot != null ? lp.slot : i,
         scheme: lp.scheme || 'p1',
         local: true,
@@ -1940,7 +2446,17 @@
 
     // 'host' recibe además los jugadores remotos por red
     if (opts.remotePlayers) {
-      for (const rp of opts.remotePlayers) addRemotePlayer(rp.id, rp.name, rp.skin);
+      for (const rp of opts.remotePlayers) addRemotePlayer(rp.id, rp.name, rp.skin, rp.char);
+    }
+
+    // Todas las mejoras son del equipo: cada jugador apunta a la lista común.
+    for (const p of G.players) { p.items = G.items; p.coins = 0; p.keys = 0; }
+    syncPool();
+    // Reanimaciones iniciales (en solitario: una para toda la partida).
+    for (const p of G.players) p.revives = reviveBase();
+    if (global.Meta) {
+      global.Meta.reachFloor(G.floorNum);
+      if (isCoop()) global.Meta.recordCoop();
     }
 
     enterRoom(startRoom);
@@ -1954,17 +2470,19 @@
     }
   }
 
-  function addRemotePlayer(id, name, skin) {
+  function addRemotePlayer(id, name, skin, char) {
     if (G.players.find((p) => p.id === id)) return null;
     const slot = slotFree();
     const p = E.createPlayer(id, {
       name: name || ('Jugador ' + (G.players.length + 1)),
       skin: skin != null ? skin : (slot + 1),
+      char: char,
       slot,
       scheme: 'p1',
       local: false,
     });
     p.remote = true;
+    p.items = G.items;
     p.x = C.CX + (Math.random() - 0.5) * 60;
     p.y = C.CY + 30 + (Math.random() - 0.5) * 30;
     if (G.room) { clampPlayerToRoom(p); resolveObstacles(p); }
@@ -1993,6 +2511,7 @@
       mx: arr[0] || 0, my: arr[1] || 0,
       sx: arr[2] || 0, sy: arr[3] || 0,
       fire: !!arr[4],
+      use: !!arr[5],
     };
   }
 
@@ -2034,10 +2553,21 @@
     G.buffer = [];
   }
 
+  function runSummary() {
+    return {
+      floor: G.floorNum,
+      kills: G.stats.kills,
+      win: !!G.victory,
+      items: G.items.length,
+    };
+  }
+
   global.Game = {
     G, start, step, stop, view, setPaused,
     addRemotePlayer, removePlayer, setRemoteInput,
     applyState, applyPing, serialState,
+    tryUseAbility, reviveBase, giveItemToAll, runSummary,
+    addCoins, spendCoins, addKeys, spendKey, syncPool, countItem,
     setHandlers(h) { handlers = h || {}; },
     get simulating() { return simulating(); },
   };

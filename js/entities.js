@@ -50,9 +50,9 @@
   const ITEMS = [
     {
       id: 'heart', name: 'Corazón de sobra',
-      desc: '+1 corazón de vida máxima y cura completa.',
+      desc: '+1 corazón de vida máxima y te cura medio corazón.',
       color: '#ff5f7e',
-      apply(p) { p.maxHp += 2; p.hp = p.maxHp; },
+      apply(p) { p.maxHp += 2; p.hp = Math.min(p.maxHp, p.hp + 2); },
     },
     {
       id: 'blood', name: 'Sangre de mártir',
@@ -128,9 +128,9 @@
     },
     {
       id: 'crown', name: 'Corona rota',
-      desc: '+1 corazón de vida máxima.',
+      desc: '+1 corazón de vida máxima y te cura un poco.',
       color: '#ffd166',
-      apply(p) { p.maxHp += 2; p.hp += 2; },
+      apply(p) { p.maxHp += 2; p.hp = Math.min(p.maxHp, p.hp + 1); },
     },
     {
       id: 'iron', name: 'Piel de hierro',
@@ -170,6 +170,7 @@
     uncommon: { id: 'uncommon', name: 'Poco común', color: '#6ee7a8', w: 26 },
     rare:     { id: 'rare',     name: 'Raro',       color: '#68c7ff', w: 10 },
     epic:     { id: 'epic',     name: 'Épico',      color: '#c78bff', w: 3 },
+    legendary:{ id: 'legendary',name: 'Legendario', color: '#ffcf5c', w: 1 },
   };
   const tierOf = (item) => TIERS[(item && item.tier) || 'common'] || TIERS.common;
 
@@ -217,9 +218,9 @@
     },
     {
       id: 'bandage', name: 'Vendaje', tier: 'uncommon', pools: ['treasure', 'shop'],
-      desc: 'Regeneras medio corazón con el tiempo.',
+      desc: 'Regeneras vida lentamente con el tiempo.',
       color: '#f0d9d9',
-      apply(p) { p.regen += 0.4; },
+      apply(p) { p.regen += 0.25; },
     },
     {
       id: 'tacon', name: 'Tacón puntiagudo', tier: 'uncommon', pools: ['treasure', 'shop'],
@@ -259,9 +260,9 @@
     },
     {
       id: 'bigheart', name: 'Corazón de oro', tier: 'rare', pools: ['treasure', 'boss'],
-      desc: '+2 corazones de vida máxima.',
+      desc: '+2 corazones de vida máxima y te cura un poco.',
       color: '#ffd166',
-      apply(p) { p.maxHp += 4; p.hp += 4; },
+      apply(p) { p.maxHp += 4; p.hp = Math.min(p.maxHp, p.hp + 2); },
     },
     {
       id: 'dmgup', name: 'Furia divina', tier: 'rare', pools: ['treasure', 'boss'],
@@ -277,13 +278,13 @@
     },
     {
       id: 'armor2', name: 'Coraza de placas', tier: 'rare', pools: ['treasure', 'boss'],
-      desc: 'Recibes 2 puntos menos de daño (mínimo 1).',
+      desc: 'Recibes 1 punto menos de daño (mínimo 1).',
       color: '#c0ccd8',
-      apply(p) { p.armor += 2; },
+      apply(p) { p.armor += 1; },
     },
     {
       id: 'vampire', name: 'Colmillo de vampiro', tier: 'epic', pools: ['treasure', 'boss'],
-      desc: 'Recuperas medio corazón al matar.',
+      desc: 'Recuperas medio corazón cada dos enemigos eliminados.',
       color: '#b03a4a',
       apply(p) { p.lifesteal = true; },
     },
@@ -297,7 +298,9 @@
       id: 'extra_life', name: 'Cordero pascual', tier: 'epic', pools: ['boss'],
       desc: 'Revives una vez con medio corazón al morir.',
       color: '#fff2c2',
-      apply(p) { p.revives += 1; },
+      // Marcador: `Game.reviveBase()` cuenta este objeto para calcular las
+      // reanimaciones (así recomputeStats lo reaplica sin duplicar vidas).
+      apply(p) { p.reviveMark = true; },
     },
     {
       id: 'quad', name: 'Cuádruple', tier: 'epic', pools: ['boss'],
@@ -379,7 +382,7 @@
     },
     {
       id: 'greed', name: 'Mano generosa', tier: 'rare', pools: ['shop', 'boss'],
-      desc: 'Cada 4 monedas que recoges te curan medio corazón.',
+      desc: 'Cada 6 monedas que recoges te curan medio corazón.',
       color: '#ffcf5c',
       apply(p) { p.greed = true; },
     },
@@ -400,6 +403,13 @@
       desc: '+0.7 de daño por cada efecto único que lleves.',
       color: '#b0f0ff',
       apply(p) { p.prism += 0.7; },
+    },
+    {
+      id: 'phoenix', name: 'Pluma de fénix', tier: 'legendary', pools: ['shop'],
+      desc: 'Revives una vez MÁS por piso. Muy rara: solo en la tienda.',
+      color: '#ffcf5c',
+      // Marcador: reviveBase() lo cuenta para las reanimaciones por piso.
+      apply(p) { p.reviveMark = true; },
     },
   );
 
@@ -623,38 +633,8 @@
   function recomputeStats(p) {
     if (!p) return p;
     const hp = (typeof p.hp === 'number') ? p.hp : 6;
-    // valores base (los mismos que createPlayer)
-    p.maxHp = 6;
-    p.speed = 192;
-    p.damage = 3.4;
-    p.fireRate = 2.4;
-    p.bulletSpeed = 440;
-    p.bulletSize = 6.5;
-    p.extraShots = 0;
-    p.piercing = false;
-    p.range = 0.85;
-    p.luck = 0;
-    p.armor = 0;
-    p.regen = 0;
-    p.homing = false;
-    p.bounce = 0;
-    p.lifesteal = false;
-    // efectos únicos
-    p.burn = 0;
-    p.poison = 0;
-    p.freeze = 0;
-    p.chain = 0;
-    p.explode = 0;
-    p.boomerang = 0;
-    p.familiars = 0;
-    p.magnet = false;
-    p.charger = false;
-    p.thorns = 0;
-    p.doubleTap = 0;
-    p.greed = false;
-    p.pushback = 0;
-    p.potency = 1;
-    p.prism = 0;
+    // Base del personaje (estadísticas propias + su pasiva).
+    resetStats(p);
     // compass/hasMap, shield, revives, coins y keys los manda el anfitrión:
     // no se recalculan para no deshacer los gastos ni las banderas.
     for (const id of p.items || []) {
@@ -670,17 +650,70 @@
   // ---------------------------------------------------------
   // JUGADOR
   // ---------------------------------------------------------
+  function charOf(opts) {
+    const CH = global.Characters;
+    const id = opts && opts.char != null ? opts.char : 'isaac';
+    if (CH) return CH.byId(id);
+    return { id: id, skin: 0, stats: {}, passive: null, active: null };
+  }
+  const charIdOf = (p) => (p && p.charId) || 'isaac';
+
+  // Valores base comunes a todos los personajes (los mismos para todos).
+  const BASE_STATS = {
+    maxHp: 6, speed: 192, damage: 3.4, fireRate: 2.4, bulletSpeed: 440, bulletSize: 6.5,
+    extraShots: 0, piercing: false, range: 0.85, luck: 0, armor: 0,
+    regen: 0, homing: false, bounce: 0, lifesteal: false,
+    flying: false, shieldRegen: false, coinsHeal: false, allyHeal: false, rageOnHurt: false,
+    burn: 0, poison: 0, freeze: 0, chain: 0, explode: 0, boomerang: 0,
+    familiars: 0, magnet: false, charger: false, thorns: 0, doubleTap: 0,
+    greed: false, pushback: 0, potency: 1, prism: 0, roomHeal: 0,
+  };
+
+  // Estadísticas base del personaje (incluye sus deltas, el azar de Edén y
+  // su pasiva). NO toca los campos consumibles/sincronizados.
+  function resetStats(p) {
+    const ch = charOf({ char: charIdOf(p) });
+    for (const k in BASE_STATS) p[k] = BASE_STATS[k];
+    const st = ch.stats || {};
+    for (const k in st) p[k] = (p[k] || 0) + st[k];
+    if (ch.id === 'eden') {
+      if (!p.randStats) p.randStats = rollEdenStats(p);
+      for (const k in p.randStats) p[k] = (p[k] || 0) + p.randStats[k];
+    }
+    if (ch.passive && typeof ch.passive.apply === 'function') {
+      try { ch.passive.apply(p); } catch (e) { /* pasiva inocua */ }
+    }
+    return p;
+  }
+
+  // Estadísticas aleatorias de Edén (una vez por partida).
+  function rollEdenStats(p) {
+    const rng = Utils.mulberry32(Utils.hash('eden:' + (p.id || '') + ':' + Math.floor(Math.random() * 1e9)));
+    const out = {};
+    out.maxHp = (Utils.randInt(rng, 0, 4) - 2) * 2;       // -2..+2 corazones
+    out.damage = (rng() * 3 - 1.2);                        // -1.2..+1.8
+    out.fireRate = (rng() * 1.4 - 0.4);
+    out.speed = (rng() * 80 - 30);
+    out.range = (rng() * 0.4 - 0.15);
+    out.luck = (rng() * 4 - 1) | 0;
+    out.bulletSize = (rng() * 3 - 1);
+    for (const k in out) out[k] = Math.round(out[k] * 100) / 100;
+    return out;
+  }
+
   function createPlayer(id, opts) {
     opts = opts || {};
-    const skin = normSkin(opts.skin != null ? opts.skin : 0);
+    const ch = charOf(opts);
+    const skin = normSkin(opts.char != null ? ch.skin : (opts.skin != null ? opts.skin : 0));
     const sk = SKINS[skin];
-    return {
+    const p = {
       kind: 'player',
       id,
       name: opts.name || 'Jugador',
       slot: opts.slot || 0,
       color: opts.color || sk.color,
       skin,
+      charId: ch.id,
       scheme: opts.scheme || 'p1',
       local: !!opts.local,
       remote: !!opts.remote,
@@ -693,42 +726,24 @@
       face: { x: 0, y: 1 },
       walkPhase: 0,
 
+      // ---- estadísticas derivadas (las rellena resetStats) ----
       hp: 6, maxHp: 6,
-      speed: 192,
-      damage: 3.4,
-      fireRate: 2.4,
-      bulletSpeed: 440,
-      bulletSize: 6.5,
-      extraShots: 0,
-      piercing: false,
-      range: 0.85,
-      luck: 0,
-      armor: 0,
-      compass: false,
-      hasMap: false,
-      regen: 0,
-      shield: 0,
-      revives: 0,
-      homing: false,
-      bounce: 0,
-      lifesteal: false,
+      speed: 192, damage: 3.4, fireRate: 2.4, bulletSpeed: 440, bulletSize: 6.5,
+      extraShots: 0, piercing: false, range: 0.85, luck: 0, armor: 0,
+      regen: 0, homing: false, bounce: 0, lifesteal: false,
+      flying: false, shieldRegen: false, coinsHeal: false, allyHeal: false, rageOnHurt: false,
+      roomHeal: 0,
 
-      // ---- efectos únicos (habilidades, no solo números) ----
-      burn: 0,        // tus lágrimas prenden fuego (segundos)
-      poison: 0,      // tus lágrimas envenenan (segundos)
-      freeze: 0,      // tus lágrimas congelan/ralentizan
-      chain: 0,       // saltos del rayo en cadena
-      explode: 0,     // radio de explosión de tus lágrimas
-      boomerang: 0,   // tus lágrimas vuelven a ti
-      familiars: 0,   // moscas que orbitan y hacen daño
-      magnet: false,  // atraes monedas y objetos
-      charger: false, // disparo cargado tras una pausa
-      thorns: 0,      // daño que devuelves al ser tocado
-      doubleTap: 0,   // probabilidad de ráfaga doble
-      greed: false,   // las monedas te curan
-      pushback: 0,    // tus lágrimas empujan enemigos
-      potency: 1,     // potencia todos tus efectos (sinergia)
-      prism: 0,       // +daño por cada efecto distinto que lleves
+      // ---- efectos únicos ----
+      burn: 0, poison: 0, freeze: 0, chain: 0, explode: 0, boomerang: 0,
+      familiars: 0, magnet: false, charger: false, thorns: 0, doubleTap: 0,
+      greed: false, pushback: 0, potency: 1, prism: 0,
+
+      // ---- habilidad activa ----
+      abCharges: 0, abMax: 0, abCd: 0, abCdMax: 1,
+
+      // ---- mejoras temporales (activas) ----
+      buff: { dmg: 0, dmgT: 0, fire: 0, fireT: 0, spd: 0, spdT: 0, fam: 0, famT: 0 },
 
       shootCd: 0,
       invuln: 0,
@@ -737,15 +752,28 @@
       dead: false,
       reviveTimer: 0,
 
+      // consumibles y estado de partida (recomputeStats NO los toca)
       coins: 0,
       keys: 0,
+      shield: 0,
+      revives: 0,
+      compass: false,
+      hasMap: false,
       items: [],
 
-      input: { mx: 0, my: 0, sx: 0, sy: 0, fire: false },
+      input: { mx: 0, my: 0, sx: 0, sy: 0, fire: false, use: false },
       // predicción en cliente
       srvX: null, srvY: null,
       ping: 0,
     };
+    resetStats(p);
+    p.hp = p.maxHp;
+    if (opts.hp != null) p.hp = opts.hp;
+    p.abMax = ch.active ? ch.active.charges : 0;
+    p.abCharges = p.abMax;
+    p.abCdMax = ch.active ? ch.active.cd : 1;
+    if (opts.abCharges != null) p.abCharges = opts.abCharges;
+    return p;
   }
 
   // ---------------------------------------------------------
@@ -775,6 +803,16 @@
     fat: {
       hp: 30, speed: 54, r: 22, dmg: 2, ai: 'chase', color: '#c98fb0',
       xp: 3, splits: 2,
+    },
+    ghost: {
+      // Espectro: persigue sin chocar con nada (atraviesa obstáculos).
+      hp: 11, speed: 99, r: 15, dmg: 1, ai: 'chase', color: '#bcd4ff',
+      xp: 2, phase: true, ghostly: true,
+    },
+    sniper: {
+      // Francotirador: se mantiene lejos y dispara rápido y con puntería.
+      hp: 16, speed: 44, r: 16, dmg: 2, ai: 'shoot', color: '#e0b0ff',
+      xp: 3, shotRate: 2.6, shotSpeed: 300, keepDist: 265, shootRange: 560,
     },
     boss: {
       hp: 150, speed: 62, r: 30, dmg: 1, ai: 'boss', color: '#b04a5e',
@@ -828,11 +866,43 @@
   // Orden de jefes por piso (el piso 1 usa el primero, etc.).
   const BOSS_ROSTER = ['boss', 'boss2', 'boss3', 'boss4', 'boss5', 'boss6', 'boss7', 'boss8'];
 
+  // Cada piso dispone de una bolsa de AL MENOS 3 jefes; al entrar en su sala
+  // se elige UNO al azar (de forma determinista por semilla). Los primeros
+  // pisos traen jefes "básicos" y los últimos a los más peligrosos, de modo
+  // que la dificultad sube piso a piso aunque el jefe sea aleatorio.
+  const BOSS_POOLS = [
+    ['boss', 'boss2', 'boss4'],
+    ['boss2', 'boss3', 'boss5'],
+    ['boss3', 'boss4', 'boss6'],
+    ['boss4', 'boss5', 'boss7'],
+    ['boss5', 'boss6', 'boss8'],
+    ['boss6', 'boss7', 'boss1'],
+    ['boss7', 'boss8', 'boss2'],
+    ['boss8', 'boss1', 'boss3'],
+    ['boss1', 'boss2', 'boss3', 'boss4', 'boss5', 'boss6', 'boss7', 'boss8'],
+  ];
+
+  // Vida objetivo de un jefe según el piso (progresión clara de dificultad).
+  function bossTargetHp(floorNum) {
+    const f = Math.max(1, floorNum | 0);
+    return 150 * (1 + (f - 1) * 0.55);
+  }
+
   function createEnemy(type, x, y, floorNum) {
     const t = ENEMY_TYPES[type] || ENEMY_TYPES.fly;
-    const hpMul = 1 + (floorNum - 1) * 0.55;
-    const spMul = 1 + (floorNum - 1) * 0.07;
-    const hp = Math.round(t.hp * hpMul);
+    const f = Math.max(1, floorNum | 0);
+    let hp, spMul, shotMul = 1;
+    if (t.isBoss) {
+      // Todos los jefes del mismo piso comparten vida objetivo; el orden en la
+      // rotación sólo añade un pequeño matiz, nunca rompe la progresión.
+      const idx = Math.max(0, BOSS_ROSTER.indexOf(type));
+      hp = Math.round(bossTargetHp(f) * (1 + idx * 0.04));
+      spMul = 1 + (f - 1) * 0.045;
+      shotMul = 1 + (f - 1) * 0.03;
+    } else {
+      hp = Math.round(t.hp * (1 + (f - 1) * 0.55));
+      spMul = 1 + (f - 1) * 0.07;
+    }
     return {
       kind: 'enemy',
       id: newId(),
@@ -846,10 +916,13 @@
       ai: t.ai,
       color: t.color,
       wobble: !!t.wobble,
+      phase: !!t.phase,
       xp: t.xp || 1,
       splits: t.splits || 0,
       shotRate: t.shotRate || 0,
-      shotSpeed: t.shotSpeed || 0,
+      shotSpeed: t.shotSpeed ? t.shotSpeed * shotMul : 0,
+      keepDist: t.keepDist || 0,
+      shootRange: t.shootRange || 0,
       shotCd: 0.6 + Math.random() * 0.9,
       // estado de IA
       dir: { x: 0, y: 0 },
@@ -928,25 +1001,28 @@
     opts = opts || {};
     const a = Math.random() * Math.PI * 2;
     const sp = opts.pop === false ? 0 : 60 + Math.random() * 70;
+    const isChest = type === 'chest';
     return {
       kind: 'pickup',
       id: newId(),
-      type, // 'heart' | 'halfheart' | 'coin' | 'key' | 'trapdoor'
+      type, // 'heart' | 'halfheart' | 'coin' | 'key' | 'trapdoor' | 'relic' | 'chest'
       x, y,
-      r: type === 'trapdoor' ? 26 : 13,
+      r: type === 'trapdoor' ? 26 : (isChest ? 16 : 13),
       vx: Math.cos(a) * sp,
       vy: Math.sin(a) * sp,
       life: opts.life || 0,   // 0 = permanente
       age: 0,
-      price: opts.price || 0,
+      price: opts.price || 0, // monedas (tienda)
+      keys: opts.keys || 0,   // llaves necesarias para abrir un cofre (0 = gratis)
       bob: Math.random() * 6.28,
+      lock: opts.lock || 0,   // segundos de bloqueo tras aparecer (no se puede coger)
     };
   }
 
   // ---------------------------------------------------------
   // PEDESTALES (objetos)
   // ---------------------------------------------------------
-  function createPedestal(itemId, x, y, price) {
+  function createPedestal(itemId, x, y, price, lock) {
     return {
       kind: 'pedestal',
       id: newId(),
@@ -955,6 +1031,7 @@
       price: price || 0,
       taken: false,
       bob: Math.random() * 6.28,
+      lock: lock || 0,   // segundos de bloqueo tras aparecer
     };
   }
 
@@ -982,8 +1059,9 @@
   global.Entities = {
     COLORS, NAMES_1, ITEMS, ENEMY_TYPES, SKINS, skinAt, skinColor, normSkin,
     newId, resetIds, itemById, findItem,
-    TIERS, tierOf, ITEM_META, pickItem, itemStatDeltas, BOSS_ROSTER, recomputeStats,
+    TIERS, tierOf, ITEM_META, pickItem, itemStatDeltas, BOSS_ROSTER, BOSS_POOLS, bossTargetHp, recomputeStats,
     SYNERGIES, activeSynergies, synergyWith, profile, effectCount, familiarPos,
+    STAT_SPEC, BOOL_SPEC, BASE_STATS, resetStats, charOf, charIdOf, rollEdenStats,
     createPlayer, createEnemy, createBullet, createPickup, createPedestal,
     spawnParticles,
   };

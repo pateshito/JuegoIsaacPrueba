@@ -305,8 +305,146 @@ kbd{
 }
 .toast.hidden{display:none}
 
+/* ---------------- Barra de progreso (menú) ---------------- */
+.meta-bar{
+  display:flex;align-items:center;justify-content:center;gap:10px;
+  margin:0 0 14px;font-size:13px;color:var(--dim);
+}
+.meta-bar b{color:var(--accent)}
+.meta-sep{opacity:.4}
+.meta-ach b{color:var(--accent2)}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:8px}
+
+/* ---------------- Selector de personajes ---------------- */
+.chars{display:flex;flex-wrap:wrap;gap:8px}
+.char-btn{
+  appearance:none;position:relative;
+  display:flex;flex-direction:column;align-items:center;gap:4px;
+  width:64px;padding:8px 4px 6px;
+  border-radius:12px;
+  border:2px solid #413356;
+  background:#140f1d;
+  cursor:pointer;
+  color:var(--dim);
+  transition:transform .12s,border-color .12s,box-shadow .12s,filter .12s;
+}
+.char-btn:hover{transform:translateY(-2px);border-color:#5a4878}
+.char-btn .face{
+  position:relative;width:24px;height:24px;border-radius:50%;
+  box-shadow:inset 0 -5px 0 rgba(0,0,0,.12);
+  flex:none;
+}
+.char-btn .face::before,
+.char-btn .face::after{
+  content:'';position:absolute;top:38%;width:4px;height:4.6px;border-radius:50%;
+  background:#20182b;
+}
+.char-btn .face::before{left:5px}
+.char-btn .face::after{right:5px}
+.char-btn .cname{
+  font-size:10px;font-weight:600;letter-spacing:.02em;
+  max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.char-btn.selected{border-color:var(--accent);box-shadow:0 0 0 3px rgba(255,182,72,.18);color:var(--ink)}
+.char-btn.locked{filter:grayscale(.7);opacity:.6}
+.char-btn .lock{position:absolute;top:3px;right:5px;font-size:11px}
+
+/* ---------------- Tienda ---------------- */
+.shop-coins{margin:0 0 12px;font-size:14px;color:var(--dim)}
+.shop-coins b{color:var(--accent);font-size:16px}
+.shop-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;margin:6px 0 16px}
+.shop-card{
+  display:flex;gap:11px;
+  background:#191322;border:1px solid #322948;border-radius:12px;
+  padding:11px;
+}
+.shop-card.owned{border-color:rgba(127,224,138,.4)}
+.shop-card .face{
+  position:relative;width:34px;height:34px;border-radius:50%;flex:none;
+  box-shadow:inset 0 -6px 0 rgba(0,0,0,.12);
+}
+.shop-card .face::before,
+.shop-card .face::after{
+  content:'';position:absolute;top:38%;width:5px;height:6px;border-radius:50%;background:#20182b;
+}
+.shop-card .face::before{left:7px}
+.shop-card .face::after{right:7px}
+.shop-card .info{flex:1;min-width:0}
+.shop-card h4{margin:0 0 2px;font-size:14px;color:var(--ink)}
+.shop-card .tagline{font-size:11px;color:var(--dim);margin:0 0 5px}
+.shop-card .ab{font-size:11.5px;color:#cfe3ff;margin:2px 0}
+.shop-card .pv{font-size:11.5px;color:#ffd9a8;margin:2px 0}
+.shop-card .cost{font-size:12px;color:var(--accent);font-weight:700;margin-top:5px}
+.shop-card .btn{margin-top:7px;width:100%}
+
+/* ---------------- Progreso ---------------- */
+.prog-stats{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 14px}
+.prog-stats .chip{
+  background:#191322;border:1px solid #322948;border-radius:9px;
+  padding:7px 11px;font-size:12.5px;color:var(--dim);
+}
+.prog-stats .chip b{color:var(--accent)}
+ul.ach-list{list-style:none;margin:0 0 14px;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:7px}
+ul.ach-list li{
+  display:flex;gap:9px;align-items:flex-start;
+  background:#191322;border:1px solid #322948;border-radius:9px;padding:8px 10px;
+  opacity:.55;
+}
+ul.ach-list li.earned{opacity:1;border-color:rgba(255,182,72,.45)}
+ul.ach-list li .ico{font-size:16px;line-height:1.1}
+ul.ach-list li b{display:block;font-size:13px;color:var(--ink)}
+ul.ach-list li span{font-size:11.5px;color:var(--dim)}
+.danger-row{justify-content:space-between}
+.btn.danger{background:linear-gradient(180deg,#3a1a1f,#2a1216);border-color:#7a2b34;color:#ffb3b3}
+.btn.danger:hover{border-color:#a83a46}
+
+/* ---------------- Overlay de mejoras (Tab) ---------------- */
+.overlay-dim{background:rgba(6,4,10,.72)}
+.hint{font-size:11px;color:var(--dim);text-transform:none;letter-spacing:0}
+.upg-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin:6px 0 14px}
+.upg-card{
+  position:relative;
+  background:#191322;border:1px solid #322948;border-radius:10px;
+  padding:9px 10px;cursor:help;
+}
+.upg-card .uname{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--ink)}
+.upg-card .doti{width:12px;height:12px;border-radius:50%;flex:none;box-shadow:inset 0 -3px 0 rgba(0,0,0,.25)}
+.upg-card .tier{font-size:10px;text-transform:uppercase;letter-spacing:.08em;margin-left:auto}
+.upg-desc{
+  display:none;
+  margin-top:6px;font-size:11.5px;color:var(--dim);line-height:1.4;
+}
+.upg-card:hover{background:#221931;border-color:#5a4878;z-index:2}
+.upg-card:hover .upg-desc{display:block}
+.upg-desc .delta{color:var(--good)}
+.upg-desc .delta.neg{color:var(--bad)}
+.upg-desc .syn{color:#ffe6a8}
+
+/* ---------------- Avisos de logro (abajo-izquierda) ---------------- */
+.ach-toasts{
+  position:absolute;left:14px;bottom:14px;z-index:25;
+  display:flex;flex-direction:column;gap:8px;pointer-events:none;
+}
+.ach-toast{
+  display:flex;gap:10px;align-items:center;
+  min-width:210px;max-width:300px;
+  background:linear-gradient(180deg,#2a2138,#1d1728);
+  border:1px solid var(--accent);
+  border-radius:11px;padding:9px 13px;
+  box-shadow:0 12px 30px rgba(0,0,0,.55);
+  animation:toastIn .28s ease-out;
+}
+.ach-toast .ico{font-size:20px}
+.ach-toast b{display:block;font-size:13px;color:var(--accent)}
+.ach-toast span{font-size:11.5px;color:var(--dim)}
+@keyframes toastIn{from{opacity:0;transform:translateX(-18px)}to{opacity:1;transform:none}}
+
+.end-coins{margin-top:10px;font-size:14px;color:var(--accent);font-weight:600}
+
 @media (max-width:520px){
   .panel{padding:16px 14px 14px;border-radius:13px}
   .btn{padding:11px 12px;font-size:14px}
   .cols{gap:10px}
+  .shop-grid{grid-template-columns:1fr}
+  .upg-list{grid-template-columns:repeat(auto-fill,minmax(120px,1fr))}
 }

@@ -2,7 +2,7 @@
 
 Prototipo de **roguelike 2D** inspirado en *The Binding of Isaac*, hecho con **HTML, CSS y JavaScript puro** (sin frameworks ni paso de compilación). Se puede jugar **en solitario**, en **cooperativo local** (2 jugadores en el mismo teclado) o **online en salas de 1 a 4 jugadores**.
 
-El objetivo es sencillo: baja los **3 pisos** del calabozo, derrota al **jefe** de cada piso y pisa la trampilla para descender. Si todos los jugadores caen, se acaba la partida.
+El objetivo es sencillo: baja los **9 pisos** del calabozo, derrota al **jefe** de cada piso y pisa la trampilla para descender. Cada piso es más grande, tiene más enemigos y un jefe con su propio patrón. Si todos los jugadores caen, se acaba la partida.
 
 ---
 
@@ -22,7 +22,7 @@ El objetivo es sencillo: baja los **3 pisos** del calabozo, derrota al **jefe** 
 
 ## ▶️ Cómo jugar
 
-Antes de empezar, escribe tu **nombre** en el campo **Tu nombre** del menú (también aparece en la pantalla *Unirse a una sala*). Se recuerda en el navegador y se usa en todos los modos: en solitario, cooperativo local y online.
+Antes de empezar, escribe tu **nombre** y elige tu **personaje (skin)** en el menú. El nombre aparece también en la pantalla *Unirse a una sala*. Tanto el nombre como la skin se recuerdan en el navegador y se usan en todos los modos: en solitario, cooperativo local y online (los demás jugadores ven tu skin).
 
 ### En solitario
 1. Abre el juego.
@@ -57,12 +57,23 @@ No hay servidor propio: la partida se juega **Peer-to-Peer (WebRTC)** usando el 
 ## 🕹️ Cómo se juega (reglas)
 
 - Cada habitación se **cierra** hasta que derrotas a todos los enemigos; entonces se abren las puertas.
-- El **minimapa** (arriba a la derecha) muestra las salas visitadas, las puertas y el tipo de habitación.
-- Tipos de sala: **inicio**, **normal**, **tesoro**, **tienda** (los objetos se compran con monedas) y **jefe**.
-- Enemigos: `fly` (mosca), `gaper`, `charger` (embiste), `spitter` (escupe), `hopper` (salta), `fat` (gordo) y el **jefe** (con segunda fase).
-- Recoge **corazones** (rojo = 1 de vida, medio = medio corazón), **monedas** y objetos de los pedestales.
-- Objetos disponibles: *Corazón de sobra*, *Sangre de mártir*, *Pies ligeros*, *Gatillo rápido*, *Lágrima gigante*, *Tridente*, *Cuerno perforante*, *Lente de aumento* y *Trébol de la suerte*.
-- Derrota al jefe, baja por la **trampilla** y repite en el piso 2 y 3. Al superar el piso 3, **¡victoria!**
+- **Gracia al entrar**: al cruzar una puerta, los jugadores son invulnerables unos instantes y los enemigos aparecen con un breve margen (y nunca pegados a la puerta por la que entras), para que no te hagan daño nada más aparecer.
+- El **minimapa** (arriba a la derecha) muestra las salas visitadas, las puertas y el tipo de habitación. Las salas contiguas aún **sin explorar** se marcan con **«?»** y *no se vuelven a ocultar* al moverte a otra habitación.
+- Tipos de sala: **inicio**, **normal**, **tesoro**, **tienda** (los objetos se compran con monedas) y **jefe**. Cuanto más bajas, más salas por piso (hasta 22).
+- Algunas salas opcionales (**tesoro** siempre, **tienda** a partir del piso 2) tienen la puerta con **candado dorado**: hace falta una **llave 🔑** para abrirla. El camino al jefe nunca se cierra.
+- Enemigos: `fly` (mosca), `gaper`, `charger` (embiste), `spitter` (escupe), `hopper` (salta), `fat` (gordo, se divide) y **8 jefes** distintos, uno por piso, cada uno con patrón y estadísticas propias (ráfagas, embestidas, espirales, teletransporte, saltos, plumas, calaveras y aparición de esbirros).
+- Recoge **corazones** (rojo = 1 de vida, medio = medio corazón), **monedas**, **llaves** y objetos de los pedestales.
+- Hay **unos 50 objetos** repartidos en **4 niveles de rareza**: común, poco común, raro y épico (los raros salen mucho menos). Unos afectan a daño, cadencia, velocidad, proyectil extra, balas perforantes/rebotantes/teledirigidas, armadura, regeneración, escudo, vidas extra, robo de vida… y a la **Brújula** y el **Mapa del piso**.
+- Otros dan **habilidades únicas**: fuego, veneno, hielo, explosiones, rayos en cadena, bumerán, **moscas familiares** que orbitan, imán de monedas, golpe cargado, espinas que devuelven daño, ráfaga doble, codicia y empuje.
+- Las habilidades **sinergizan** entre sí (12 combinaciones): fuego + veneno = «Nube tóxica ardiente», explosión + rebotes = «Metralla», hielo + perforante = «Escarcha cortante», cadena + teledirigido = «Tormenta dirigida», y más. El globo anticipa las sinergias con **⚡ Sinergia** antes de coger el objeto.
+- Los objetos se reparten por **zonas**: la **sala del tesoro**, la **tienda** (con precio) y la **recompensa del jefe** (algunos salen en varias). Además hay **10 skins** de personaje con accesorios propios.
+- Al acercarte a un pedestal aparece un **globo** con el nombre, la rareza y lo que suma o resta el objeto (y el precio, si es de la tienda).
+- Derrota al jefe, baja por la **trampilla** y repite en los pisos 2 a 9. Al superar el piso 9, **¡victoria!**
+
+### Música y sonido
+
+- La banda sonora es **procedural** (WebAudio, sin archivos): una pista para el **menú**, otra para las **salas** y otra para el **jefe**, que cambia automáticamente según dónde estés. Ahora suenan con **batería** (bombo, caja y hi-hat), **bajo y acordes de potencia con distorsión** y tempos rápidos.
+- Pulsa `M` (o el botón 🔊 de la barra superior) para **silenciar** efectos y música.
 
 ---
 
@@ -130,7 +141,7 @@ Se usan etiquetas `<script>` clásicas (sin módulos ES) para que el juego tambi
 
 ## 🧪 Salud del proyecto
 
-- La simulación y el renderizado están verificados con un conjunto de pruebas sin navegador (Node): generación de calabozo determinista, transiciones de puerta, progresión completa (pisos → jefe → trampilla → victoria), ausencia de excepciones y una prueba de integración de la interfaz.
+- La simulación y el renderizado están verificados con un conjunto de pruebas sin navegador (Node): generación de calabozo determinista, transiciones de puerta, progresión completa (pisos → jefe → trampilla → victoria), objetos y rarezas, **habilidades únicas y sinergias** (fuego/veneno con daño con el tiempo, explosión en área, rayo en cadena, moscas familiares, imán, espinas, codicia, bumerán, empuje, serialización del estado de los enemigos y globo con sinergias), cerraduras con llave, patrones de jefe, globo de objetos, ausencia de excepciones y una prueba de integración de la interfaz.
 - El protocolo de red (anfitrión y cliente) también está cubierto con un PeerJS simulado: *hello/welcome*, lobby, *start*, instantáneas de estado, `ping/pong`, jugador que entra/sale, sala llena y fin de partida.
 
 ---

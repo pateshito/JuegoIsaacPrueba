@@ -32,6 +32,8 @@
     joinStatus: $('#join-status'),
     playerNameInput: $('#player-name'),
     joinName: $('#join-name'),
+    skinPicker: $('#skin-picker'),
+    skinPickerJoin: $('#skin-picker-join'),
     toast: $('#toast'),
   };
 
@@ -40,6 +42,7 @@
   let isHosting = false;
   let roomCode = '';
   let playerName = 'Jugador';
+  let playerSkin = 0;
   let lobbyPeers = [];           // {id, name, color, isHost}
   let myClientId = null;
   let hostSeed = 0, hostFloor = 1;
@@ -116,6 +119,48 @@
   }
 
   // ---------------------------------------------------------
+  // Skins del personaje
+  // ---------------------------------------------------------
+  function loadSavedSkin() {
+    try {
+      const v = parseInt(localStorage.getItem('llanto-skin'), 10);
+      return isFinite(v) ? Entities.normSkin(v) : 0;
+    } catch (e) { return 0; }
+  }
+
+  function saveSkin(i) {
+    try { localStorage.setItem('llanto-skin', String(i)); } catch (e) {}
+  }
+
+  function renderSkinPickers() {
+    [ui.skinPicker, ui.skinPickerJoin].forEach((box) => {
+      if (!box) return;
+      box.innerHTML = '';
+      Entities.SKINS.forEach((sk, i) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'skin-btn' + (i === playerSkin ? ' selected' : '');
+        b.title = sk.name;
+        b.setAttribute('data-skin', String(i));
+        b.setAttribute('aria-label', sk.name);
+        b.style.borderColor = i === playerSkin ? '' : sk.color;
+        const f = document.createElement('span');
+        f.className = 'face';
+        f.style.background = sk.skin;
+        b.appendChild(f);
+        box.appendChild(b);
+      });
+    });
+  }
+
+  function setSkin(i) {
+    playerSkin = Entities.normSkin(i);
+    saveSkin(playerSkin);
+    renderSkinPickers();
+    Sfx.play('ui');
+  }
+
+  // ---------------------------------------------------------
   // Lobby
   // ---------------------------------------------------------
   function renderLobby() {
@@ -126,7 +171,7 @@
       const li = document.createElement('li');
       const dot = document.createElement('span');
       dot.className = 'dot';
-      dot.style.background = p.color || '#888';
+      dot.style.background = Entities.skinColor(p.skin != null ? p.skin : 0);
       const nm = document.createElement('span');
       nm.textContent = p.name;
       li.appendChild(dot);
@@ -142,7 +187,7 @@
   }
 
   function localHostPeer() {
-    return { id: 'host', name: myName('Anfitrión'), color: Entities.COLORS[0], isHost: true };
+    return { id: 'host', name: myName('Anfitrión'), skin: playerSkin, isHost: true };
   }
 
   // ---------------------------------------------------------
@@ -154,7 +199,7 @@
     Game.setHandlers({ onEnd: onGameEnd, onPing: null });
     Game.start({
       mode: 'local',
-      localPlayers: [{ id: 'p0', name: myName('Isaac'), color: Entities.COLORS[0], slot: 0, scheme: 'p1' }],
+      localPlayers: [{ id: 'p0', name: myName('Isaac'), skin: playerSkin, slot: 0, scheme: 'p1' }],
     });
     setScene('playing');
   }
@@ -166,8 +211,8 @@
     Game.start({
       mode: 'local',
       localPlayers: [
-        { id: 'p0', name: myName('Isaac'), color: Entities.COLORS[0], slot: 0, scheme: 'p1' },
-        { id: 'p1', name: 'Magdalena', color: Entities.COLORS[1], slot: 1, scheme: 'p2' },
+        { id: 'p0', name: myName('Isaac'), skin: playerSkin, slot: 0, scheme: 'p1' },
+        { id: 'p1', name: 'Magdalena', skin: Entities.normSkin(playerSkin + 3), slot: 1, scheme: 'p2' },
       ],
     });
     setScene('playing');
@@ -231,7 +276,7 @@
         const entry = {
           id: peerId,
           name: String(msg.name || 'Jugador').slice(0, 14),
-          color: Entities.COLORS[slot % Entities.COLORS.length],
+          skin: Entities.normSkin(msg.skin != null ? msg.skin : slot),
           isHost: false,
         };
         lobbyPeers.push(entry);
@@ -241,15 +286,15 @@
           t: 'welcome',
           id: peerId,
           name: entry.name,
-          color: entry.color,
+          skin: entry.skin,
           seed: Game.G.seed,
           floor: Game.G.floorNum,
           running,
-          players: lobbyPeers.map((p) => ({ id: p.id, name: p.name, color: p.color, isHost: p.isHost })),
+          players: lobbyPeers.map((p) => ({ id: p.id, name: p.name, skin: p.skin, isHost: p.isHost })),
         });
 
         if (running) {
-          Game.addRemotePlayer(peerId, entry.name);
+          Game.addRemotePlayer(peerId, entry.name, entry.skin);
           Net.sendTo(peerId, { t: 'start', seed: Game.G.seed, floor: Game.G.floorNum });
           Net.sendTo(peerId, { t: 'state', s: Game.serialState() });
         } else {
@@ -278,12 +323,12 @@
   function broadcastLobby() {
     Net.broadcast({
       t: 'lobby',
-      players: lobbyPeers.map((p) => ({ id: p.id, name: p.name, color: p.color, isHost: p.isHost })),
+      players: lobbyPeers.map((p) => ({ id: p.id, name: p.name, skin: p.skin, isHost: p.isHost })),
     });
   }
 
   function startHostRun() {
-    const remote = lobbyPeers.filter((p) => !p.isHost).map((p) => ({ id: p.id, name: p.name }));
+    const remote = lobbyPeers.filter((p) => !p.isHost).map((p) => ({ id: p.id, name: p.name, skin: p.skin }));
     const seed = Utils.makeSeed();
     hostSeed = seed;
     hostFloor = 1;
@@ -292,7 +337,7 @@
       mode: 'host',
       seed,
       floorNum: 1,
-      localPlayers: [{ id: 'host', name: myName('Anfitrión'), color: Entities.COLORS[0], slot: 0, scheme: 'p1' }],
+      localPlayers: [{ id: 'host', name: myName('Anfitrión'), skin: playerSkin, slot: 0, scheme: 'p1' }],
       remotePlayers: remote,
     });
     Net.broadcast({ t: 'start', seed, floor: 1 });
@@ -320,7 +365,7 @@
     Net.join(code, {
       onOpen() {
         ui.joinStatus.textContent = 'Conectado. Entrando…';
-        Net.sendToHost({ t: 'hello', name: myName('Jugador') });
+        Net.sendToHost({ t: 'hello', name: myName('Jugador'), skin: playerSkin });
       },
       onData(msg) {
         handleClientData(msg);
@@ -398,7 +443,7 @@
       seed: hostSeed,
       floorNum: hostFloor,
       localId: myClientId,
-      localPlayers: [{ id: myClientId, name: myName('Jugador'), color: Entities.COLORS[1], slot: 1, scheme: 'p1' }],
+      localPlayers: [{ id: myClientId, name: myName('Jugador'), skin: playerSkin, slot: 1, scheme: 'p1' }],
     });
     setScene('playing');
   }
@@ -409,6 +454,7 @@
   function onGameEnd(kind) {
     if (endHandled) return;
     endHandled = true;
+    Sfx.stopMusic();
     const g = Game.G;
     if (kind === 'win') {
       ui.endTitle.textContent = '¡Victoria!';
@@ -505,11 +551,18 @@
       const view = Game.view();
       Render.frame(view);
       updateTopbar(view);
+      if (Game.G.over) Sfx.stopMusic();
+      else {
+        const r = view.room;
+        Sfx.playMusic(r && r.type === 'boss' && !r.cleared ? 'boss' : 'floor');
+      }
     } else {
       acc = 0;
       paintIdle(dt);
+      if (scene === 'menu' || scene === 'lobby') Sfx.playMusic('menu');
     }
 
+    if (Input.consume('KeyM')) toggleMute();
     if (Input.consume('Escape')) togglePause();
     Input.endFrame();
   }
@@ -519,6 +572,14 @@
     const p = !Game.G.paused;
     Game.setPaused(p);
     if (p) { show(ui.ovPause); } else { hide(ui.ovPause); }
+  }
+
+  function toggleMute() {
+    const m = !Sfx.isMuted();
+    Sfx.setMuted(m);
+    ui.btnMute.textContent = m ? '🔇' : '🔊';
+    ui.btnMute.title = m ? 'Activar sonido (M)' : 'Silenciar (M)';
+    toast(m ? 'Sonido silenciado' : 'Sonido activado', 1400);
   }
 
   // ---------------------------------------------------------
@@ -552,15 +613,16 @@
 
   function bindUI() {
     document.addEventListener('click', (e) => {
+      const sb = e.target.closest('[data-skin]');
+      if (sb && sb.getAttribute('data-skin') != null) {
+        setSkin(parseInt(sb.getAttribute('data-skin'), 10));
+        return;
+      }
       const btn = e.target.closest('[data-action]');
       if (btn) onAction(btn.getAttribute('data-action'));
     });
 
-    ui.btnMute.addEventListener('click', () => {
-      const m = !Sfx.isMuted();
-      Sfx.setMuted(m);
-      ui.btnMute.textContent = m ? '🔇' : '🔊';
-    });
+    ui.btnMute.addEventListener('click', toggleMute);
     ui.btnPause.addEventListener('click', togglePause);
     ui.btnQuit.addEventListener('click', quitToMenu);
 
@@ -588,8 +650,10 @@
 
     // nombre del jugador (editable y recordado; dos campos sincronizados)
     playerName = loadSavedName() || 'Jugador ' + (1 + Math.floor(Math.random() * 9));
+    playerSkin = loadSavedSkin();
     ui.playerNameInput.value = playerName;
     ui.joinName.value = playerName;
+    renderSkinPickers();
     ui.playerNameInput.addEventListener('input', () => {
       playerName = sanitizeName(ui.playerNameInput.value);
       ui.joinName.value = playerName;

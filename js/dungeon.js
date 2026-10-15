@@ -82,6 +82,7 @@
       const room = {
         gx, gy, type,
         doors: { up: false, down: false, left: false, right: false },
+        locks: { up: false, down: false, left: false, right: false },
         obstacles: [],
         visited: false,
         cleared: type === 'start' || type === 'treasure' || type === 'shop',
@@ -99,7 +100,7 @@
 
     addRoom(startGX, startGY, 'start');
 
-    const target = 7 + floorNum * 2; // 9 / 11 / 13 habitaciones
+    const target = Math.min(22, 8 + floorNum * 2); // 10 / 12 / 14 … hasta 22
     const frontier = [[startGX, startGY]];
     let guard = 0;
 
@@ -155,6 +156,23 @@
     if (deadEnds[0]) { deadEnds[0].type = 'treasure'; deadEnds[0].cleared = true; }
     if (deadEnds[1]) { deadEnds[1].type = 'shop'; deadEnds[1].cleared = true; }
 
+    // ---------- Puertas con llave ----------
+    // Se cierran con llave las entradas a las salas opcionales: usar una llave
+    // para entrar en el tesoro (siempre) y en la tienda (según el piso). Así las
+    // llaves tienen utilidad sin bloquear nunca el camino hacia el jefe.
+    function lockRoom(room) {
+      for (const d of DIRS) {
+        if (!room.doors[d.n]) continue;
+        room.locks[d.n] = true;
+        const nb = rooms[key(room.gx + d.dx, room.gy + d.dy)];
+        if (nb) nb.locks[OPPOSITE[d.n]] = true;
+      }
+    }
+    if (deadEnds[0] && deadEnds[0].type === 'treasure') lockRoom(deadEnds[0]);
+    if (deadEnds[1] && deadEnds[1].type === 'shop' && (floorNum >= 2 || rng() < 0.5)) {
+      lockRoom(deadEnds[1]);
+    }
+
     // ---------- Obstáculos ----------
     for (const r of list) {
       const rr = Utils.mulberry32(Utils.hash(r.key + ':' + seed + ':' + floorNum));
@@ -178,9 +196,11 @@
     const rng = Utils.mulberry32(Utils.hash(room.key + '#e' + seed + '#' + floorNum));
 
     if (room.type === 'boss') {
-      const n = 1 + Math.min(1, Math.floor((floorNum - 1) / 2));
-      const plan = [{ type: 'boss', count: 1 }];
-      for (let i = 1; i < n; i++) plan.push({ type: 'gaper', count: 2 });
+      const roster = (typeof Entities !== 'undefined' && Entities.BOSS_ROSTER) || ['boss'];
+      const bType = roster[(floorNum - 1) % roster.length];
+      const plan = [{ type: bType, count: 1 }];
+      const n = Math.min(2, Math.floor((floorNum - 1) / 2));
+      for (let i = 0; i < n; i++) plan.push({ type: 'gaper', count: 2 });
       return plan;
     }
 

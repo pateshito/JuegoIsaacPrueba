@@ -33,6 +33,10 @@
           <label for="player-name">Tu nombre</label>
           <input id="player-name" class="name-input" maxlength="14" autocomplete="off" spellcheck="false" placeholder="Isaac">
         </div>
+        <div class="skin-field">
+          <label>Tu personaje</label>
+          <div id="skin-picker" class="skins" role="listbox" aria-label="Skins de personaje"></div>
+        </div>
         <div class="buttons">
           <button class="btn primary" data-action="solo">▶ Jugar solo</button>
           <button class="btn" data-action="coop">👥 Cooperativo local (2p)</button>
@@ -40,7 +44,7 @@
           <button class="btn" data-action="join">🔗 Unirse a una sala</button>
           <button class="btn ghost" data-action="help">? Controles y ayuda</button>
         </div>
-        <p class="foot">Flechas para disparar · WASD para moverte</p>
+        <p class="foot">Flechas para disparar · WASD para moverte · M silencia</p>
       </div>
     </div>
 
@@ -60,9 +64,17 @@
           <div class="col">
             <h3>Cómo se juega</h3>
             <p>Entra a cada habitación y derrota a todos los enemigos para abrir las puertas.</p>
+            <p>Al entrar en una sala los enemigos no hacen daño durante un instante: aprovecha para reaccionar.</p>
             <p>Explora el mapa (arriba a la derecha) y busca la habitación del <b>jefe</b>.</p>
-            <p>Derrota al jefe y pisa la trampilla para bajar de piso. Hay 3 pisos.</p>
+            <p>Derrota al jefe y pisa la trampilla para bajar de piso. Hay <b>9 pisos</b>, cada uno con un jefe distinto y más peligroso.</p>
             <p>Recoge <b>corazones</b> (rojo = vida, medio = media), <b>monedas</b> y objetos de los pedestales.</p>
+            <p>Los objetos tienen <b>rareza</b>: común, poco común, raro y épico. Cuanto más raro, menos probable.</p>
+            <p>Cada zona tiene sus objetos: el <b>tesoro</b>, la <b>tienda</b> (paga con monedas) y el <b>jefe</b> al morir.</p>
+            <p>Acércate a un pedestal y verás un <b>globo</b> con el nombre, la rareza y lo que suma o resta.</p>
+            <p>Muchos objetos dan <b>habilidades únicas</b> además de estadísticas: fuego, veneno, hielo, explosiones, rayos en cadena, bumerán, moscas familiares, imán, golpe cargado, espinas, ráfaga doble, codicia y empuje.</p>
+            <p>Las habilidades <b>sinergizan</b> entre sí: por ejemplo fuego + veneno = «Nube tóxica ardiente». El globo te avisa con <b>⚡ Sinergia</b> cuando un objeto activará una combinación.</p>
+            <p>Las puertas con <b>candado dorado</b> necesitan una <b>llave 🔑</b>; pisa hacia ellas para abrirlas.</p>
+            <p>El minimapa marca con <b>«?»</b> las salas contiguas sin explorar, y no se vuelven a ocultar.</p>
             <p>Cada jugador empieza con 3 corazones. Si todos caen, fin de la partida.</p>
           </div>
           <div class="col">
@@ -107,6 +119,10 @@
         <div class="name-field">
           <label for="join-name">Tu nombre</label>
           <input id="join-name" class="name-input" maxlength="14" autocomplete="off" spellcheck="false" placeholder="Isaac">
+        </div>
+        <div class="skin-field">
+          <label>Tu personaje</label>
+          <div id="skin-picker-join" class="skins" role="listbox" aria-label="Skins de personaje"></div>
         </div>
         <input id="join-code" class="code-input" maxlength="4" autocomplete="off" spellcheck="false" placeholder="ABCD">
         <p id="join-status" class="status"></p>

@@ -15,7 +15,7 @@
     WALL: 26,          // grosor del muro dibujado
     DOOR_HALF: 58,     // semi-anchura de la boca de la puerta
     MAX_PLAYERS: 4,
-    FLOORS: 3,
+    FLOORS: 9,
     RENDER_DELAY: 0.13, // segundos de retardo de interpolación en el cliente
   };
   C.ROOM_W = C.TILE * C.COLS;                        // 728

@@ -13,6 +13,11 @@
   const SEND_HZ = 1 / 20;
   const INPUT_HZ = 1 / 30;
 
+  // Número finito garantizado (evita que un NaN procedente de la red o de un
+  // cálculo inesperado se propague a la simulación y al renderizado).
+  const num = (v, d) => (typeof v === 'number' && isFinite(v) ? v : (d === undefined ? 0 : d));
+  const n1 = (v, d) => r1(num(v, d));
+
   const G = {
     mode: 'local',
     running: false,
@@ -81,6 +86,12 @@
     return list[Math.floor(Math.random() * list.length)].id;
   }
 
+  // Elige un objeto de la pool indicada ('treasure' | 'shop' | 'boss'),
+  // ponderando por tier y evitando repetir los que ya tiene el equipo.
+  function pickPoolItem(pool, avoid) {
+    return E.pickItem(pool, avoid);
+  }
+
   function setMessage(txt, dur) {
     G.message = txt;
     G.messageTimer = dur || 2.2;
@@ -116,18 +127,21 @@
     return room.cleared || room.type === 'start' || room.type === 'treasure' || room.type === 'shop';
   }
 
+  // Una puerta con llave bloquea el paso aunque la sala esté despejada.
+  const doorLocked = (room, dir) => !!(room && room.locks && room.locks[dir]);
+  const doorPassable = (room, dir) => !!room && doorOpen(room) && !!room.doors[dir] && !doorLocked(room, dir);
+
   // Limita al jugador dentro de la sala (permite asomarse a las puertas abiertas)
   function clampPlayerToRoom(p) {
     const room = G.room;
-    const open = doorOpen(room);
     let minX = C.INNER_L + p.r, maxX = C.INNER_R - p.r;
     let minY = C.INNER_T + p.r, maxY = C.INNER_B - p.r;
     const slack = C.DOOR_HALF - p.r - 2;
 
-    if (open && room.doors.left && Math.abs(p.y - C.CY) < slack) minX = C.ROOM_X - 30;
-    if (open && room.doors.right && Math.abs(p.y - C.CY) < slack) maxX = C.ROOM_X + C.ROOM_W + 30;
-    if (open && room.doors.up && Math.abs(p.x - C.CX) < slack) minY = C.ROOM_Y - 30;
-    if (open && room.doors.down && Math.abs(p.x - C.CX) < slack) maxY = C.ROOM_Y + C.ROOM_H + 30;
+    if (doorPassable(room, 'left') && Math.abs(p.y - C.CY) < slack) minX = C.ROOM_X - 30;
+    if (doorPassable(room, 'right') && Math.abs(p.y - C.CY) < slack) maxX = C.ROOM_X + C.ROOM_W + 30;
+    if (doorPassable(room, 'up') && Math.abs(p.x - C.CX) < slack) minY = C.ROOM_Y - 30;
+    if (doorPassable(room, 'down') && Math.abs(p.x - C.CX) < slack) maxY = C.ROOM_Y + C.ROOM_H + 30;
 
     p.x = Utils.clamp(p.x, minX, maxX);
     p.y = Utils.clamp(p.y, minY, maxY);
@@ -143,7 +157,14 @@
   // ---------------------------------------------------------
   function movePlayer(p, input, dt) {
     if (p.dead) return;
-    const sp = p.speed;
+    // saneado defensivo (una posición no finita nunca debe propagarse)
+    if (!p.face) p.face = { x: 0, y: 1 };
+    if (!p.aim) p.aim = { x: 0, y: 1 };
+    if (!isFinite(p.x) || !isFinite(p.y)) { p.x = C.CX; p.y = C.CY; }
+    if (!isFinite(p.walkPhase)) p.walkPhase = 0;
+    if (!isFinite(p.aim.x)) p.aim.x = 0;
+    if (!isFinite(p.aim.y)) p.aim.y = 1;
+    const sp = num(p.speed, 192);
     p.vx = (input.mx || 0) * sp;
     p.vy = (input.my || 0) * sp;
     p.x += p.vx * dt;
@@ -166,19 +187,48 @@
   // ---------------------------------------------------------
   // Disparos
   // ---------------------------------------------------------
-  function playerShoot(p) {
+  function playerShoot(p, charged, noBurst) {
+    const pr = E.profile(p);
     const base = Math.atan2(p.aim.y, p.aim.x);
     const n = 1 + p.extraShots;
+    const big = !!charged;
+    const dmg = p.damage + pr.bonusDamage;
     for (let i = 0; i < n; i++) {
       const spread = n === 1 ? 0 : (i - (n - 1) / 2) * 0.2;
       const a = base + spread;
+      const sp = p.bulletSpeed * (big ? 0.92 : 1);
       G.bullets.push(E.createBullet(
         p.x + Math.cos(a) * 16, p.y + Math.sin(a) * 16,
-        Math.cos(a) * p.bulletSpeed, Math.sin(a) * p.bulletSpeed,
-        { friendly: true, dmg: p.damage, r: p.bulletSize, color: '#dff1ff', life: p.range, pierce: p.piercing, owner: p.id }
+        Math.cos(a) * sp, Math.sin(a) * sp,
+        {
+          friendly: true,
+          dmg: dmg * (big ? pr.chargeMul : 1),
+          r: p.bulletSize * (big ? 1.75 : 1),
+          color: big ? '#ffe08a' : '#dff1ff',
+          life: p.range * (big ? 1.2 : 1),
+          pierce: p.piercing,
+          owner: p.id,
+          bounce: p.bounce || 0,
+          homing: !!p.homing,
+          explode: pr.explodeR * (big ? 1.3 : 1),
+          chain: pr.chain,
+          burn: pr.burn, burnDps: pr.burnDps,
+          poison: pr.poison, poisonDps: pr.poisonDps,
+          freeze: pr.freezeTime, slowF: pr.slowF,
+          cryo: pr.cryo,
+          push: pr.push,
+          shatter: pr.shatter,
+          boomerang: pr.boomerang,
+          shrapnel: pr.shrapnel,
+        }
       ));
     }
-    G.fxQueue.push({ k: 'puff', x: p.x + Math.cos(base) * 18, y: p.y + Math.sin(base) * 18, c: '#cfe8ff', n: 3 });
+    // Ráfaga doble (Doble intención): programa disparos extra muy seguidos.
+    if (!noBurst && pr.doubleTap > 0 && Math.random() < pr.doubleTap) {
+      p.burstTimes = (p.burstTimes || []).concat([G.time + 0.1, G.time + 0.2]);
+      p.burstCharged = big;
+    }
+    G.fxQueue.push({ k: 'puff', x: p.x + Math.cos(base) * 18, y: p.y + Math.sin(base) * 18, c: big ? '#ffe08a' : '#cfe8ff', n: big ? 8 : 3 });
     Sfx.play('shoot');
   }
 
@@ -197,6 +247,20 @@
   // ---------------------------------------------------------
   function hurtPlayer(p, dmg, fromX, fromY) {
     if (p.dead || p.invuln > 0) return;
+    dmg = Math.max(1, dmg - (p.armor || 0));
+
+    // Escudo: absorbe un golpe entero y se rompe.
+    if (p.shield > 0) {
+      p.shield--;
+      p.invuln = 1.0;
+      p.hurtFlash = 0.25;
+      addShake(0.25);
+      Sfx.play('hit');
+      G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#8fd3ff', n: 14 });
+      setMessage(p.name + ': ¡el escudo aguantó!', 1.6);
+      return;
+    }
+
     p.hp -= dmg;
     p.invuln = 1.35;
     p.hurtFlash = 0.3;
@@ -210,7 +274,29 @@
       p.y += ((p.y - fromY) / d) * 14;
     }
 
+    // Corona de espinas: devuelve daño a quien te toca.
+    const pr = E.profile(p);
+    if (pr.thorns > 0) {
+      G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#d8b0c0', n: 10 });
+      for (let i = G.enemies.length - 1; i >= 0; i--) {
+        const e = G.enemies[i];
+        if (e.spawnT > 0) continue;
+        if (Math.hypot(e.x - p.x, e.y - p.y) < pr.thornsR + e.r) damageEnemy(e, pr.thorns, e.x, e.y);
+      }
+    }
+
     if (p.hp <= 0) {
+      // Vida extra: revive en el sitio con medio corazón.
+      if (p.revives > 0) {
+        p.revives--;
+        p.hp = Math.max(2, Math.floor(p.maxHp / 2));
+        p.invuln = 2.6;
+        G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#fff2c2', n: 28 });
+        addShake(0.5);
+        Sfx.play('pickup');
+        setMessage(p.name + ' ¡ha revivido!', 2.4);
+        return;
+      }
       p.hp = 0;
       p.dead = true;
       p.reviveTimer = 0;
@@ -249,7 +335,16 @@
     const luck = bestLuck();
     if (Math.random() < 0.15 + luck * 0.05) dropPickup('heart', e.x, e.y);
     else if (Math.random() < 0.28 + luck * 0.08) dropPickup('coin', e.x, e.y);
-    if (Math.random() < 0.045) dropPickup('key', e.x, e.y);
+    if (Math.random() < 0.085 + luck * 0.03) dropPickup('key', e.x, e.y);
+
+    // robo de vida (Colmillo de vampiro): cura a quien lo lleve
+    for (const p of G.players) {
+      const pr = E.profile(p);
+      if (pr.lifestealHeal > 0 && !p.dead && p.hp < p.maxHp) {
+        p.hp = Math.min(p.maxHp, p.hp + pr.lifestealHeal);
+        G.fxQueue.push({ k: 'puff', x: p.x, y: p.y, c: '#ff8fa8', n: 5 });
+      }
+    }
 
     if (e.isBoss) onBossDefeated();
   }
@@ -268,31 +363,42 @@
   // ---------------------------------------------------------
   // Salas
   // ---------------------------------------------------------
-  function findSpawnPos(rng, avoidCenter) {
+  function findSpawnPos(rng, avoidCenter, entrySide) {
     const pad = 46;
-    for (let i = 0; i < 40; i++) {
+    const band = 120;
+    for (let i = 0; i < 60; i++) {
       const x = C.INNER_L + pad + rng() * (C.INNER_R - C.INNER_L - pad * 2);
       const y = C.INNER_T + pad + rng() * (C.INNER_B - C.INNER_T - pad * 2);
       if (avoidCenter && Utils.dist(x, y, C.CX, C.CY) < 110) continue;
+      // no aparecer pegado a la puerta por la que entran los jugadores
+      if (entrySide === 'left' && x < C.INNER_L + band) continue;
+      if (entrySide === 'right' && x > C.INNER_R - band) continue;
+      if (entrySide === 'up' && y < C.INNER_T + band) continue;
+      if (entrySide === 'down' && y > C.INNER_B - band) continue;
       let ok = true;
       for (const o of G.room.obstacles) {
         if (Utils.dist(x, y, o.x, o.y) < o.r + 26) { ok = false; break; }
       }
       if (ok) return { x, y };
     }
-    return { x: C.INNER_L + pad + rng() * 200, y: C.INNER_T + pad };
+    // último recurso: lejos del lado de entrada
+    return {
+      x: C.CX + (entrySide === 'left' ? 100 : entrySide === 'right' ? -100 : 0),
+      y: C.CY + (entrySide === 'up' ? 80 : entrySide === 'down' ? -80 : 0),
+    };
   }
 
-  function spawnEnemies(room) {
+  function spawnEnemies(room, entrySide) {
     const rng = Utils.mulberry32(Utils.hash(room.key + '@' + G.seed + '@' + G.floorNum));
     const plan = Dungeon.enemyPlan(room, G.floorNum, G.seed);
     for (const entry of plan) {
       for (let i = 0; i < entry.count; i++) {
         let pos;
-        if (entry.type === 'boss') {
+        const tdef = E.ENEMY_TYPES[entry.type] || {};
+        if (tdef.isBoss) {
           pos = { x: C.CX, y: C.INNER_T + 84 };
         } else {
-          pos = findSpawnPos(rng, true);
+          pos = findSpawnPos(rng, true, entrySide);
         }
         G.enemies.push(E.createEnemy(entry.type, pos.x, pos.y, G.floorNum));
       }
@@ -300,24 +406,28 @@
     if (plan.length) Sfx.play('door');
   }
 
-  function enterRoom(room) {
+  function enterRoom(room, entrySide) {
     G.room = room;
     room.visited = true;
     if (!room.pickups) room.pickups = [];
     if (!room.pedestals) room.pedestals = [];
+    if (!room.locks) room.locks = { up: false, down: false, left: false, right: false };
 
     if (!simulating()) return;
 
     if (!room.spawned) {
       room.spawned = true;
       if (room.type === 'treasure') {
-        room.pedestals.push(E.createPedestal(randomItemId(ownedItems()), C.CX, C.CY));
+        room.pedestals.push(E.createPedestal(pickPoolItem('treasure', ownedItems()), C.CX, C.CY));
       } else if (room.type === 'shop') {
-        room.pedestals.push(E.createPedestal('heart', C.CX - 110, C.CY, 7));
-        room.pedestals.push(E.createPedestal(randomItemId(ownedItems()), C.CX, C.CY, 12));
-        room.pedestals.push(E.createPedestal(randomItemId(ownedItems()), C.CX + 110, C.CY, 15));
+        const firstId = pickPoolItem('shop', ownedItems());
+        room.pedestals.push(E.createPedestal(firstId, C.CX - 120, C.CY, 12));
+        room.pedestals.push(E.createPedestal(pickPoolItem('shop', ownedItems().concat([firstId])), C.CX, C.CY, 15));
+        // consumibles con precio (las llaves ahora sirven para abrir puertas)
+        room.pickups.push(E.createPickup('key', C.CX + 120, C.CY - 26, { price: 5, pop: false }));
+        room.pickups.push(E.createPickup('heart', C.CX + 120, C.CY + 26, { price: 3, pop: false }));
       } else {
-        spawnEnemies(room);
+        spawnEnemies(room, entrySide);
       }
       G.stats.rooms++;
     }
@@ -355,12 +465,11 @@
   }
 
   function checkTransition(p) {
-    if (!doorOpen(G.room)) return null;
     const room = G.room;
-    if (p.x < C.ROOM_X - 6 && room.doors.left) return 'left';
-    if (p.x > C.ROOM_X + C.ROOM_W + 6 && room.doors.right) return 'right';
-    if (p.y < C.ROOM_Y - 6 && room.doors.up) return 'up';
-    if (p.y > C.ROOM_Y + C.ROOM_H + 6 && room.doors.down) return 'down';
+    if (p.x < C.ROOM_X - 6 && doorPassable(room, 'left')) return 'left';
+    if (p.x > C.ROOM_X + C.ROOM_W + 6 && doorPassable(room, 'right')) return 'right';
+    if (p.y < C.ROOM_Y - 6 && doorPassable(room, 'up')) return 'up';
+    if (p.y > C.ROOM_Y + C.ROOM_H + 6 && doorPassable(room, 'down')) return 'down';
     return null;
   }
 
@@ -375,10 +484,11 @@
     G.gy = next.gy;
     G.bullets.length = 0;
     G.enemies.length = 0;
-    enterRoom(next);
-    placePlayers(OPP[dir], false);
-    // empujar un poco hacia dentro
-    G.players.forEach((p) => { if (!p.dead) p.invuln = Math.max(p.invuln, 0.35); });
+    const entry = OPP[dir];               // lado por el que aparecerán los jugadores
+    enterRoom(next, entry);
+    placePlayers(entry, false);
+    // gracia al entrar: nada hace daño unos instantes
+    G.players.forEach((p) => { if (!p.dead) p.invuln = Math.max(p.invuln, 1.2); });
     G.transition = 0.34;
     Sfx.play('door');
     if (next.type === 'boss' && !next.cleared) {
@@ -390,6 +500,9 @@
   function checkRoomCleared() {
     if (G.enemies.length > 0) return;
     const room = G.room;
+    if (!room) return;
+    if (!room.pickups) room.pickups = [];
+    if (!room.pedestals) room.pedestals = [];
     if (room.cleared) return;
     room.cleared = true;
     Sfx.play('clear');
@@ -401,9 +514,10 @@
       setMessage('¡Habitación despejada!', 1.8);
     }
 
-    // recompensa del jefe: objeto + trampilla
+    // recompensa del jefe: objeto (pool de jefe) + una llave + trampilla
     if (room.type === 'boss') {
-      room.pedestals.push(E.createPedestal(randomItemId(ownedItems()), C.CX - 90, C.CY));
+      room.pedestals.push(E.createPedestal(pickPoolItem('boss', ownedItems()), C.CX - 90, C.CY));
+      room.pickups.push(E.createPickup('key', C.CX - 90, C.CY + 70, { pop: false }));
       const last = G.floorNum >= C.FLOORS;
       room.pickups.push(E.createPickup('trapdoor', C.CX + 80, C.CY, { pop: false }));
       if (last) setMessage('¡Trampilla final!', 2.4);
@@ -464,22 +578,84 @@
   // ---------------------------------------------------------
   // Actualización de jugadores
   // ---------------------------------------------------------
+  // ¿Hay una puerta con llave delante y estamos empujando hacia ella?
+  function lockedDoorNear(p, inp) {
+    const room = G.room;
+    if (!room || !room.locks) return null;
+    const slack = C.DOOR_HALF + 8;
+    if (inp.mx < 0 && room.locks.left && p.x < C.INNER_L + 30 && Math.abs(p.y - C.CY) < slack) return 'left';
+    if (inp.mx > 0 && room.locks.right && p.x > C.INNER_R - 30 && Math.abs(p.y - C.CY) < slack) return 'right';
+    if (inp.my < 0 && room.locks.up && p.y < C.INNER_T + 30 && Math.abs(p.x - C.CX) < slack) return 'up';
+    if (inp.my > 0 && room.locks.down && p.y > C.INNER_B - 30 && Math.abs(p.x - C.CX) < slack) return 'down';
+    return null;
+  }
+
+  function tryUnlockDoor(p, inp) {
+    const dir = lockedDoorNear(p, inp);
+    if (!dir) return false;
+    if (p.keys > 0) {
+      p.keys--;
+      const room = G.room;
+      room.locks[dir] = false;
+      const d = DELTA[dir];
+      const nb = Dungeon.get(G.dungeon, G.gx + d[0], G.gy + d[1]);
+      if (nb) { if (!nb.locks) nb.locks = { up: false, down: false, left: false, right: false }; nb.locks[OPP[dir]] = false; }
+      Sfx.play('unlock');
+      addShake(0.16);
+      G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#ffd166', n: 16 });
+      setMessage('¡Puerta desbloqueada! (' + p.keys + ' llaves)', 1.8);
+      return true;
+    }
+    if (!p._keyWarn || G.time - p._keyWarn > 1.5) {
+      p._keyWarn = G.time;
+      setMessage('Necesitas una llave 🔑', 1.6);
+    }
+    return false;
+  }
+
   function updatePlayer(p, dt) {
     if (p.invuln > 0) p.invuln -= dt;
     if (p.hurtFlash > 0) p.hurtFlash -= dt;
     if (p.dead) return;
 
+    // regeneración (Vendaje): acumula medios corazones
+    if (p.regen > 0 && p.hp < p.maxHp) {
+      p._regenAcc = (p._regenAcc || 0) + p.regen * dt;
+      while (p._regenAcc >= 1) {
+        p._regenAcc -= 1;
+        p.hp = Math.min(p.maxHp, p.hp + 1);
+        if (p.hp >= p.maxHp) { p._regenAcc = 0; break; }
+      }
+    }
+
     const inp = p.input || { mx: 0, my: 0, sx: 0, sy: 0, fire: false };
     movePlayer(p, inp, dt);
 
     p.shootCd -= dt;
+    p.chargeT = (p.chargeT || 0) + dt;   // tiempo sin disparar (Golpe cargado)
     if (inp.fire && (inp.sx || inp.sy) && p.shootCd <= 0) {
+      const pr = E.profile(p);
+      const charged = pr.charger && p.chargeT >= pr.chargeTime;
       p.shootCd = 1 / p.fireRate;
-      playerShoot(p);
+      p.chargeT = 0;
+      playerShoot(p, charged);
     }
+
+    // ráfaga doble pendiente
+    if (p.burstTimes && p.burstTimes.length) {
+      p.burstTimes = p.burstTimes.filter((t) => {
+        if (G.time >= t) { playerShoot(p, p.burstCharged, true); return false; }
+        return true;
+      });
+    }
+
+    // imán de monedas
+    updateMagnet(p, dt);
 
     // recoger objetos
     pickupItems(p);
+    // puertas con llave
+    tryUnlockDoor(p, inp);
     // puertas
     const dir = checkTransition(p);
     if (dir) goThroughDoor(dir);
@@ -496,8 +672,22 @@
           nextFloor();
           return;
         }
-        room.pickups.splice(i, 1);
-        applyPickup(p, k.type);
+        if (k.price > 0) {
+          if (p.coins < k.price) {
+            if (!p._coinWarn || G.time - p._coinWarn > 1.5) {
+              p._coinWarn = G.time;
+              setMessage('Necesitas ' + k.price + ' monedas', 1.6);
+            }
+            continue;
+          }
+          p.coins -= k.price;
+          room.pickups.splice(i, 1);
+          applyPickup(p, k.type);
+          setMessage(p.name + ' compró por ' + k.price + ' monedas', 1.8);
+        } else {
+          room.pickups.splice(i, 1);
+          applyPickup(p, k.type);
+        }
       }
     }
 
@@ -534,6 +724,18 @@
       else { p.coins += 1; Sfx.play('coin'); }
     } else if (type === 'coin') {
       p.coins += 1;
+      // Mano generosa: cada 4 monedas curan medio corazón.
+      const pr = E.profile(p);
+      if (pr.greedHeal > 0) {
+        p._greedAcc = (p._greedAcc || 0) + pr.greedHeal;
+        if (p._greedAcc >= 4) {
+          p._greedAcc -= 4;
+          if (p.hp < p.maxHp) {
+            p.hp = Math.min(p.maxHp, p.hp + 1);
+            G.fxQueue.push({ k: 'puff', x: p.x, y: p.y, c: '#ffd166', n: 6 });
+          }
+        }
+      }
       Sfx.play('coin');
     } else if (type === 'key') {
       p.keys += 1;
@@ -564,6 +766,20 @@
     e.anim += dt;
     if (e.flash > 0) e.flash -= dt;
     if (e.spawnT > 0) { e.spawnT -= dt; return; }
+
+    // Empuje (Vendaval, explosiones): se aplica y se va frenando.
+    if (e.knock && (e.knock.x || e.knock.y)) {
+      moveEntity(e, e.knock.x * dt, e.knock.y * dt);
+      const kd = Math.pow(0.02, dt);
+      e.knock.x *= kd; e.knock.y *= kd;
+      if (Math.abs(e.knock.x) < 1 && Math.abs(e.knock.y) < 1) { e.knock.x = 0; e.knock.y = 0; }
+    }
+
+    // Congelado/ralentizado (hielo): el tiempo del enemigo corre más despacio.
+    if (e.slow > 0) {
+      e.slow -= dt;
+      dt *= (1 - Math.max(0, Math.min(0.85, e.slowF || 0)));
+    }
 
     const target = nearestPlayer(e.x, e.y);
     if (!target) { clampEnemyToRoom(e); return; }
@@ -624,49 +840,200 @@
     clampEnemyToRoom(e);
   }
 
-  function bossAI(e, dt, target, d) {
-    const enraged = e.hp < e.maxHp * 0.5;
-    e.bossPhase = enraged ? 1 : 0;
+  // ---------- Ayudas de disparo de jefes ----------
+  function bossShootRing(e, n, speed, opt) {
+    opt = opt || {};
+    const off = opt.off || 0;
+    for (let i = 0; i < n; i++) {
+      const a = off + (i * Math.PI * 2) / n;
+      G.bullets.push(E.createBullet(
+        e.x + Math.cos(a) * e.r, e.y + Math.sin(a) * e.r,
+        Math.cos(a) * speed, Math.sin(a) * speed,
+        { friendly: false, dmg: 1, r: 5, color: opt.color || '#ff7a9c', life: 2.6, bounce: opt.bounce || 0 }
+      ));
+    }
+    addShake(0.12);
+  }
 
+  function bossAim(e, target, n, spread, speed, opt) {
+    opt = opt || {};
+    const a = Math.atan2(target.y - e.y, target.x - e.x);
+    for (let k = 0; k < n; k++) {
+      const aa = a + (k - (n - 1) / 2) * spread;
+      G.bullets.push(E.createBullet(
+        e.x + Math.cos(aa) * e.r, e.y + Math.sin(aa) * e.r,
+        Math.cos(aa) * speed, Math.sin(aa) * speed,
+        { friendly: false, dmg: 1, r: 5, color: opt.color || '#ff9a5c', life: 2.4, bounce: opt.bounce || 0 }
+      ));
+    }
+  }
+
+  function bossSpiralShot(e, enraged, color) {
+    e.bossSpin = (e.bossSpin || 0) + 0.26 * (enraged ? 1.5 : 1);
+    const arms = enraged ? 3 : 2;
+    for (let i = 0; i < arms; i++) {
+      const a = e.bossSpin + (i * Math.PI * 2) / arms;
+      G.bullets.push(E.createBullet(
+        e.x + Math.cos(a) * e.r, e.y + Math.sin(a) * e.r,
+        Math.cos(a) * e.shotSpeed, Math.sin(a) * e.shotSpeed,
+        { friendly: false, dmg: 1, r: 5, color: color || '#c99cff', life: 2.6 }
+      ));
+    }
+  }
+
+  // ---------- Patrones de jefe ----------
+  // 1) Monstruo: ráfagas radiales + abanico apuntado.
+  function bossBurst(e, dt, target, d, enraged) {
     if (e.bossBurst > 0) {
       e.bossBurst -= dt;
       e.bossShootCd = (e.bossShootCd || 0) - dt;
       if (e.bossShootCd <= 0) {
-        e.bossShootCd = 0.11;
-        const n = enraged ? 12 : 8;
-        const off = e.anim * 1.4;
-        for (let i = 0; i < n; i++) {
-          const a = off + (i * Math.PI * 2) / n;
-          G.bullets.push(E.createBullet(
-            e.x + Math.cos(a) * e.r, e.y + Math.sin(a) * e.r,
-            Math.cos(a) * e.shotSpeed, Math.sin(a) * e.shotSpeed,
-            { friendly: false, dmg: 2, r: 7, color: '#ff7a9c', life: 2.6 }
-          ));
-        }
-        addShake(0.18);
+        e.bossShootCd = 0.17;
+        bossShootRing(e, enraged ? 9 : 6, e.shotSpeed, { color: '#ff7a9c', off: e.anim * 1.4 });
       }
       moveEntity(e, e.dir.x * e.speed * 0.3 * dt, e.dir.y * e.speed * 0.3 * dt);
-      if (e.bossBurst <= 0) e.bossTimer = enraged ? 1.4 : 2.2;
+      if (e.bossBurst <= 0) e.bossTimer = enraged ? 1.9 : 2.8;
     } else if (e.bossTimer <= 0) {
-      e.bossBurst = 1.05;
+      e.bossBurst = 0.85;
       e.bossShootCd = 0;
       Sfx.play('hit');
     } else {
       e.bossTimer -= dt;
       moveEntity(e, e.dir.x * e.speed * dt, e.dir.y * e.speed * dt);
       e.shotCd -= dt;
-      if (e.shotCd <= 0 && d < 520) {
-        e.shotCd = enraged ? 1.1 : 1.8;
-        const a = Math.atan2(target.y - e.y, target.x - e.x);
-        for (let k = -1; k <= 1; k++) {
-          const aa = a + k * 0.24;
-          G.bullets.push(E.createBullet(
-            e.x + Math.cos(aa) * e.r, e.y + Math.sin(aa) * e.r,
-            Math.cos(aa) * e.shotSpeed, Math.sin(aa) * e.shotSpeed,
-            { friendly: false, dmg: 2, r: 7, color: '#ff9a5c', life: 2.4 }
-          ));
-        }
+      if (e.shotCd <= 0 && d < 520) { e.shotCd = enraged ? 1.6 : 2.4; bossAim(e, target, 3, 0.28, e.shotSpeed); }
+    }
+  }
+
+  // 2) Cargador: embiste en línea y suelta un anillo al frenar.
+  function bossCharge(e, dt, target, d, enraged) {
+    if (e.chargeT > 0) {
+      e.chargeT -= dt;
+      moveEntity(e, e.dir.x * e.speed * 2.2 * dt, e.dir.y * e.speed * 2.2 * dt);
+      if (e.chargeT <= 0) bossShootRing(e, enraged ? 8 : 6, e.shotSpeed * 0.9, { color: '#ffcc66' });
+    } else {
+      e.chargeCd -= dt;
+      if (e.chargeCd <= 0 && d < 480) { e.chargeT = 0.45; e.chargeCd = enraged ? 1.5 : 2.4; Sfx.play('hit'); }
+      else moveEntity(e, e.dir.x * e.speed * 0.3 * dt, e.dir.y * e.speed * 0.3 * dt);
+      e.shotCd -= dt;
+      if (e.shotCd <= 0 && d < 460) { e.shotCd = enraged ? 1.8 : 2.8; bossAim(e, target, 3, 0.24, e.shotSpeed * 0.8, { color: '#ffd166' }); }
+    }
+  }
+
+  // 3) Devorador: chorro continuo en espiral de balas lentas.
+  function bossSpiral(e, dt, target, d, enraged) {
+    e.bossShootCd = (e.bossShootCd || 0) - dt;
+    if (e.bossShootCd <= 0) { e.bossShootCd = enraged ? 0.085 : 0.12; bossSpiralShot(e, enraged, '#c99cff'); }
+    const want = 200;
+    const push = d > want + 30 ? 1 : (d < want - 30 ? -1 : 0);
+    moveEntity(e, e.dir.x * push * e.speed * 1.4 * dt, e.dir.y * push * e.speed * 1.4 * dt);
+  }
+
+  // 4) Espectro: se teletransporta y dispara en abanico apuntado.
+  function bossTeleport(e, dt, target, d, enraged) {
+    e.bossTele = (e.bossTele || 0) - dt;
+    e.shotCd -= dt;
+    if (e.bossTele <= 0) {
+      e.bossTele = enraged ? 2.1 : 3.1;
+      const pad = 92;
+      e.x = C.INNER_L + pad + Math.random() * (C.INNER_R - C.INNER_L - pad * 2);
+      e.y = C.INNER_T + pad + Math.random() * (C.INNER_B - C.INNER_T - pad * 2);
+      G.fxQueue.push({ k: 'boom', x: e.x, y: e.y, c: '#9fd0e6', n: 16 });
+      bossShootRing(e, enraged ? 10 : 7, e.shotSpeed * 0.85, { color: '#9fd0e6', off: Math.random() * 2 });
+    } else {
+      moveEntity(e, e.dir.x * e.speed * 0.5 * dt, e.dir.y * e.speed * 0.5 * dt);
+      if (e.shotCd <= 0 && d < 420) { e.shotCd = enraged ? 1.2 : 1.9; bossAim(e, target, enraged ? 5 : 3, 0.2, e.shotSpeed, { color: '#bfe3ff' }); }
+    }
+  }
+
+  // 5) Baboso: grandes saltos; al aterrizar suelta un anillo.
+  function bossHop(e, dt, target, d, enraged) {
+    e.hopCd -= dt;
+    if (e.hopCd <= 0) {
+      if (e.bossAir) {
+        e.bossAir = false;
+        e.hopCd = enraged ? 1.1 : 1.7;
+        bossShootRing(e, enraged ? 12 : 8, e.shotSpeed * 0.75, { color: '#8ee6a0' });
+        addShake(0.3);
+        G.fxQueue.push({ k: 'boom', x: e.x, y: e.y, c: '#7fd18a', n: 14 });
+      } else {
+        const a = Math.atan2(target.y - e.y, target.x - e.x) + (Math.random() - 0.5) * 0.25;
+        e.hopV.x = Math.cos(a) * e.speed * 3.0;
+        e.hopV.y = Math.sin(a) * e.speed * 3.0;
+        e.bossAir = true;
+        e.hopCd = 0.55;
       }
+    } else {
+      moveEntity(e, e.hopV.x * dt, e.hopV.y * dt);
+      const damp = Math.pow(0.05, dt);
+      e.hopV.x *= damp; e.hopV.y *= damp;
+    }
+    e.shotCd -= dt;
+    if (e.shotCd <= 0 && d < 460) { e.shotCd = enraged ? 1.6 : 2.4; bossAim(e, target, 3, 0.22, e.shotSpeed * 0.7, { color: '#b0f0c0' }); }
+  }
+
+  // 6) Serafín: vuela y deja bombas de plumas que estallan en anillo.
+  function bossFeather(e, dt, target, d, enraged) {
+    e.shotCd -= dt;
+    const want = 170;
+    const push = d > want + 30 ? 1 : (d < want - 30 ? -1 : 0);
+    moveEntity(e,
+      e.dir.x * push * e.speed * dt + Math.cos(e.anim * 1.2) * e.speed * 0.35 * dt,
+      e.dir.y * push * e.speed * dt + Math.sin(e.anim * 1.1) * e.speed * 0.35 * dt);
+    if (e.shotCd <= 0 && d < 520) {
+      e.shotCd = enraged ? 1.5 : 2.2;
+      const a0 = Math.atan2(target.y - e.y, target.x - e.x);
+      for (let k = -1; k <= 1; k++) {
+        const a = a0 + k * 0.35;
+        G.bullets.push(E.createBullet(
+          e.x + Math.cos(a) * e.r, e.y + Math.sin(a) * e.r,
+          Math.cos(a) * 90, Math.sin(a) * 90,
+          { friendly: false, dmg: 1, r: 6, color: '#ffe3a8', life: 3.4, fuse: 1.1, ring: enraged ? 10 : 7 }
+        ));
+      }
+    }
+  }
+
+  // 7) Cráneo: huesos que rebotan en las paredes.
+  function bossSkull(e, dt, target, d, enraged) {
+    e.shotCd -= dt;
+    const want = 220;
+    const push = d > want + 40 ? 1 : (d < want - 40 ? -1 : 0);
+    moveEntity(e, e.dir.x * push * e.speed * dt, e.dir.y * push * e.speed * dt);
+    if (e.shotCd <= 0 && d < 520) { e.shotCd = enraged ? 1.6 : 2.3; bossAim(e, target, enraged ? 5 : 3, 0.26, e.shotSpeed, { color: '#e8e4d8', bounce: 2 }); }
+  }
+
+  // 8) Colmena: espiral incesante + invoca moscas.
+  function bossSummon(e, dt, target, d, enraged) {
+    e.bossShootCd = (e.bossShootCd || 0) - dt;
+    if (e.bossShootCd <= 0) { e.bossShootCd = enraged ? 0.1 : 0.15; bossSpiralShot(e, enraged, '#ffd166'); }
+    e.sumCd = (e.sumCd || 0) - dt;
+    if (e.sumCd <= 0) {
+      e.sumCd = enraged ? 4 : 6;
+      const n = enraged ? 3 : 2;
+      for (let i = 0; i < n; i++) {
+        const a = Math.random() * Math.PI * 2;
+        G.enemies.push(E.createEnemy('fly', e.x + Math.cos(a) * 46, e.y + Math.sin(a) * 46, G.floorNum));
+      }
+      setMessage('¡La colmena llama a sus crías!', 1.6);
+      Sfx.play('door');
+    }
+    moveEntity(e, Math.cos(e.anim * 0.8) * e.speed * 0.6 * dt, Math.sin(e.anim * 0.7) * e.speed * 0.6 * dt);
+  }
+
+  function bossAI(e, dt, target, d) {
+    const enraged = e.hp < e.maxHp * 0.5;
+    e.bossPhase = enraged ? 1 : 0;
+    const style = e.bossStyle || (e.type === 'boss' ? 'burst' : 'burst');
+    switch (style) {
+      case 'charge': return bossCharge(e, dt, target, d, enraged);
+      case 'spiral': return bossSpiral(e, dt, target, d, enraged);
+      case 'teleport': return bossTeleport(e, dt, target, d, enraged);
+      case 'hop': return bossHop(e, dt, target, d, enraged);
+      case 'feather': return bossFeather(e, dt, target, d, enraged);
+      case 'skull': return bossSkull(e, dt, target, d, enraged);
+      case 'summon': return bossSummon(e, dt, target, d, enraged);
+      default: return bossBurst(e, dt, target, d, enraged);
     }
   }
 
@@ -693,28 +1060,253 @@
   // ---------------------------------------------------------
   // Balas
   // ---------------------------------------------------------
+  function nearestEnemyTo(x, y) {
+    let best = null, bd = Infinity;
+    for (const e of G.enemies) {
+      if (e.spawnT > 0) continue;
+      const d = Utils.dist2(x, y, e.x, e.y);
+      if (d < bd) { bd = d; best = e; }
+    }
+    return best;
+  }
+
+  // ---------------------------------------------------------
+  // Efectos únicos (fuego, veneno, hielo, rayos, familiares…)
+  // ---------------------------------------------------------
+  function pushEnemy(e, fromX, fromY, force) {
+    if (!e || !force) return;
+    const d = Math.hypot(e.x - fromX, e.y - fromY) || 1;
+    const mass = e.isBoss ? 0.35 : (e.r > 20 ? 0.6 : 1);
+    e.knock.x += ((e.x - fromX) / d) * force * mass;
+    e.knock.y += ((e.y - fromY) / d) * force * mass;
+  }
+
+  function applyStatus(b, e) {
+    if (b.burn > 0) {
+      e.burn = Math.max(e.burn || 0, b.burn);
+      e.burnDps = Math.max(e.burnDps || 0, b.burnDps);
+    }
+    if (b.poison > 0) {
+      e.poison = Math.max(e.poison || 0, b.poison);
+      e.poisonDps = Math.min(5, (e.poisonDps || 0) + b.poisonDps); // el veneno se acumula
+    }
+    if (b.slowF > 0) {
+      e.slow = Math.max(e.slow || 0, b.freeze);
+      e.slowF = Math.max(e.slowF || 0, b.slowF);
+    }
+  }
+
+  function explodeAt(x, y, r, dmg, opts) {
+    opts = opts || {};
+    if (!(r > 0)) return;
+    G.fxQueue.push({ k: 'boom', x, y, c: opts.color || '#ffb347', n: Math.min(34, 10 + Math.round(r / 2)) });
+    addShake(Math.min(0.4, 0.05 + r / 420));
+    Sfx.play('hit');
+    for (let i = G.enemies.length - 1; i >= 0; i--) {
+      const e = G.enemies[i];
+      if (e.spawnT > 0) continue;
+      if (Math.hypot(e.x - x, e.y - y) > r + e.r) continue;
+      if (opts.cryo) { e.slow = Math.max(e.slow || 0, 1.5); e.slowF = Math.max(e.slowF || 0, 0.5); }
+      pushEnemy(e, x, y, 150);
+      damageEnemy(e, dmg, e.x, e.y);
+    }
+  }
+
+  function chainLightning(from, jumps, dmg, push) {
+    let src = from;
+    const hitIds = [from.id];
+    for (let j = 0; j < jumps; j++) {
+      let best = null, bd = 200 * 200;
+      for (const e of G.enemies) {
+        if (e.spawnT > 0 || hitIds.indexOf(e.id) >= 0) continue;
+        const d = Utils.dist2(src.x, src.y, e.x, e.y);
+        if (d < bd) { bd = d; best = e; }
+      }
+      if (!best) break;
+      G.fxQueue.push({ k: 'zap', x: src.x, y: src.y, x2: best.x, y2: best.y, c: '#cfe0ff' });
+      if (push) pushEnemy(best, src.x, src.y, push);
+      hitIds.push(best.id);
+      damageEnemy(best, dmg, best.x, best.y);
+      src = best;
+    }
+  }
+
+  // Daño con el tiempo: fuego y veneno (con sus chispas).
+  function updateStatuses(dt) {
+    for (let i = G.enemies.length - 1; i >= 0; i--) {
+      const e = G.enemies[i];
+      if (e.spawnT > 0) continue;
+      let dot = 0;
+      if (e.burn > 0) {
+        e.burn -= dt;
+        dot += (e.burnDps || 0);
+        if (!e._fxT || G.time - e._fxT > 0.14) {
+          e._fxT = G.time;
+          G.fxQueue.push({ k: 'puff', x: e.x + (Math.random() - 0.5) * e.r, y: e.y + (Math.random() - 0.5) * e.r, c: '#ff9a3c', n: 2 });
+        }
+      }
+      if (e.poison > 0) {
+        e.poison -= dt;
+        dot += (e.poisonDps || 0);
+        if (e.poison <= 0) e.poisonDps = 0;
+        if (!e._fxP || G.time - e._fxP > 0.2) {
+          e._fxP = G.time;
+          G.fxQueue.push({ k: 'puff', x: e.x + (Math.random() - 0.5) * e.r, y: e.y - e.r * 0.4, c: '#9ae06a', n: 2 });
+        }
+      }
+      if (dot > 0) {
+        e.hp -= dot * dt;
+        if (e.hp <= 0) killEnemy(e);
+      }
+    }
+  }
+
+  // Moscas familiares: orbitan al jugador y dañan al contacto.
+  function updateFamiliars(dt) {
+    for (const p of G.players) {
+      if (p.dead) continue;
+      const pr = E.profile(p);
+      const n = pr.familiars;
+      if (!n) continue;
+      p._famCd = p._famCd || [];
+      for (let i = 0; i < n; i++) {
+        p._famCd[i] = Math.max(0, (p._famCd[i] || 0) - dt);
+        const fp = E.familiarPos(p, i, n, G.time);
+        for (const e of G.enemies) {
+          if (e.spawnT > 0) continue;
+          if (Utils.dist2(fp.x, fp.y, e.x, e.y) > (e.r + 9) * (e.r + 9)) continue;
+          if (p._famCd[i] <= 0) {
+            p._famCd[i] = 0.55;
+            damageEnemy(e, pr.familiarDmg, fp.x, fp.y);
+            G.fxQueue.push({ k: 'puff', x: fp.x, y: fp.y, c: '#b58cff', n: 4 });
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  // Imán: atrae los recogibles cercanos hacia el jugador.
+  function updateMagnet(p, dt) {
+    const pr = E.profile(p);
+    if (!pr.magnet) return;
+    const room = G.room;
+    if (!room || !room.pickups) return;
+    for (const k of room.pickups) {
+      if (k.type === 'trapdoor') continue;
+      const d = Math.hypot(k.x - p.x, k.y - p.y);
+      if (d > 6 && d < pr.magnetR) {
+        const s = 170 * dt;
+        k.x += ((p.x - k.x) / d) * s;
+        k.y += ((p.y - k.y) / d) * s;
+      }
+    }
+  }
+
   function updateBullets(dt) {
     const obs = G.room.obstacles;
     for (let i = G.bullets.length - 1; i >= 0; i--) {
       const b = G.bullets[i];
+
+      // Bomba con mecha (Serafín): se frena y estalla en anillo.
+      if (b.fuse > 0) {
+        b.fuse -= dt;
+        b.life -= dt;
+        b.vx *= Math.pow(0.02, dt);
+        b.vy *= Math.pow(0.02, dt);
+        b.x += b.vx * dt;
+        b.y += b.vy * dt;
+        if (b.fuse <= 0) {
+          bossShootRing(b, b.ring || 8, 150, { color: b.color, off: Math.random() * 2 });
+          G.fxQueue.push({ k: 'boom', x: b.x, y: b.y, c: b.color, n: 12 });
+          G.bullets.splice(i, 1);
+        } else if (b.life <= 0) {
+          G.bullets.splice(i, 1);
+        }
+        continue;
+      }
+
+      // Teledirigido: gira hacia el enemigo más cercano (solo balas amigas).
+      if (b.friendly && b.homing) {
+        const e = nearestEnemyTo(b.x, b.y);
+        if (e) {
+          const sp = Math.hypot(b.vx, b.vy) || 1;
+          const ax = e.x - b.x, ay = e.y - b.y;
+          const al = Math.hypot(ax, ay) || 1;
+          const turn = Math.min(1, 7 * dt);
+          b.vx = Utils.lerp(b.vx, (ax / al) * sp, turn);
+          b.vy = Utils.lerp(b.vy, (ay / al) * sp, turn);
+        }
+      }
+
       b.x += b.vx * dt;
       b.y += b.vy * dt;
       b.life -= dt;
       b.spin += dt * 8;
 
       let dead = b.life <= 0;
+      let bounced = false;
 
-      if (!dead && (b.x < C.INNER_L - 40 || b.x > C.INNER_R + 40 || b.y < C.INNER_T - 40 || b.y > C.INNER_B + 40)) {
-        dead = true;
+      // Bumerán: a mitad de camino da la vuelta y persigue a su dueño.
+      if (b.friendly && b.boomerang && !dead) {
+        if (!b.back && b.life < b.maxLife * 0.55) { b.back = true; b.hits.length = 0; }
+        if (b.back) {
+          const ow = G.players.find((q) => q.id === b.owner) || null;
+          if (ow) {
+            const dx = ow.x - b.x, dy = ow.y - b.y;
+            const dd = Math.hypot(dx, dy) || 1;
+            const sp = Math.hypot(b.vx, b.vy) || 260;
+            const turn = Math.min(1, 7 * dt);
+            b.vx = Utils.lerp(b.vx, (dx / dd) * sp, turn);
+            b.vy = Utils.lerp(b.vy, (dy / dd) * sp, turn);
+            if (dd < 20) dead = true;
+          }
+        }
       }
 
-      // obstáculos
+      // Paredes: rebotan si les quedan rebotes (o si vuelven), si no mueren al salir.
+      if (!dead) {
+        if (b.vx < 0 && b.x < C.INNER_L + b.r) {
+          if (b.bounce > 0 || b.back) { if (b.bounce > 0) b.bounce--; b.vx = -b.vx; b.x = C.INNER_L + b.r; bounced = true; }
+          else if (b.x < C.INNER_L - 40) dead = true;
+        } else if (b.vx > 0 && b.x > C.INNER_R - b.r) {
+          if (b.bounce > 0 || b.back) { if (b.bounce > 0) b.bounce--; b.vx = -b.vx; b.x = C.INNER_R - b.r; bounced = true; }
+          else if (b.x > C.INNER_R + 40) dead = true;
+        }
+        if (!dead && b.vy < 0 && b.y < C.INNER_T + b.r) {
+          if (b.bounce > 0 || b.back) { if (b.bounce > 0) b.bounce--; b.vy = -b.vy; b.y = C.INNER_T + b.r; bounced = true; }
+          else if (b.y < C.INNER_T - 40) dead = true;
+        } else if (!dead && b.vy > 0 && b.y > C.INNER_B - b.r) {
+          if (b.bounce > 0 || b.back) { if (b.bounce > 0) b.bounce--; b.vy = -b.vy; b.y = C.INNER_B - b.r; bounced = true; }
+          else if (b.y > C.INNER_B + 40) dead = true;
+        }
+      }
+
+      // obstáculos (rebote o desaparición)
       if (!dead) {
         for (let o = 0; o < obs.length; o++) {
           const ob = obs[o];
-          if (Utils.dist2(b.x, b.y, ob.x, ob.y) < (ob.r + b.r) * (ob.r + b.r)) { dead = true; break; }
+          if (Utils.dist2(b.x, b.y, ob.x, ob.y) < (ob.r + b.r) * (ob.r + b.r)) {
+            if (b.bounce > 0 || b.back) {
+              if (b.bounce > 0) b.bounce--;
+              const d = Math.sqrt(Utils.dist2(b.x, b.y, ob.x, ob.y)) || 0.001;
+              const nx = (b.x - ob.x) / d, ny = (b.y - ob.y) / d;
+              const dot = b.vx * nx + b.vy * ny;
+              b.vx -= 2 * dot * nx;
+              b.vy -= 2 * dot * ny;
+              b.x = ob.x + nx * (ob.r + b.r + 0.5);
+              b.y = ob.y + ny * (ob.r + b.r + 0.5);
+              bounced = true;
+            } else { dead = true; }
+            break;
+          }
         }
         if (dead) G.fxQueue.push({ k: 'puff', x: b.x, y: b.y, c: b.color, n: 4 });
+      }
+
+      // Sinergia Metralla: cada rebote suelta una explosión pequeña.
+      if (!dead && bounced && b.shrapnel && b.explode > 0) {
+        explodeAt(b.x, b.y, b.explode * 0.55, b.dmg * 0.5, { color: '#ffd28a' });
       }
 
       if (!dead && b.friendly) {
@@ -722,8 +1314,15 @@
           const e = G.enemies[ei];
           if (b.hits.indexOf(e.id) >= 0) continue;
           if (Utils.dist2(b.x, b.y, e.x, e.y) < (e.r + b.r) * (e.r + b.r)) {
-            damageEnemy(e, b.dmg, b.x, b.y);
-            if (b.pierce) { b.hits.push(e.id); }
+            // Sinergia Escarcha cortante: más daño a enemigos congelados.
+            let dmgEff = b.dmg;
+            if (b.shatter > 1 && e.slow > 0) dmgEff *= b.shatter;
+            damageEnemy(e, dmgEff, b.x, b.y);
+            applyStatus(b, e);
+            if (b.chain > 0) chainLightning(e, b.chain, b.dmg * 0.55, b.chainPush);
+            if (b.push) pushEnemy(e, b.x, b.y, b.push);
+            if (b.explode > 0) explodeAt(b.x, b.y, b.explode, b.dmg * 0.7, { cryo: b.cryo });
+            if (b.pierce || b.back) { b.hits.push(e.id); }
             else { dead = true; }
             break;
           }
@@ -764,6 +1363,14 @@
       if (f.k === 'puff') E.spawnParticles(G.particles, f.x, f.y, f.n || 4, f.c || '#fff', { life: 0.3, speed: 120 });
       else if (f.k === 'boom') {
         E.spawnParticles(G.particles, f.x, f.y, f.n || 10, f.c || '#fff', { life: 0.55, speed: 230 });
+      } else if (f.k === 'zap') {
+        // rayo en cadena: chispas a lo largo de la línea
+        const n = 9;
+        for (let i = 0; i <= n; i++) {
+          const t = i / n;
+          const jx = (Math.random() - 0.5) * 6, jy = (Math.random() - 0.5) * 6;
+          E.spawnParticles(G.particles, f.x + (f.x2 - f.x) * t + jx, f.y + (f.y2 - f.y) * t + jy, 2, f.c || '#cfe0ff', { life: 0.22, speed: 50 });
+        }
       }
     }
   }
@@ -808,11 +1415,13 @@
 
     for (const p of G.players) updatePlayer(p, dt);
     updateBullets(dt);
+    updateFamiliars(dt);
 
     for (const e of G.enemies) updateEnemy(e, dt);
     separateEnemies();
     for (const e of G.enemies) clampEnemyToRoom(e);
 
+    updateStatuses(dt);
     contactsPlayers(dt);
     checkRoomCleared();
 
@@ -895,35 +1504,38 @@
   function pser(p) {
     return [
       p.id, p.name, p.color,
-      r1(p.x), r1(p.y),
-      p.hp, p.maxHp,
-      r1(p.aim.x), r1(p.aim.y),
-      r1(p.face.x), r1(p.face.y),
-      r1(p.walkPhase),
+      n1(p.x), n1(p.y),
+      num(p.hp), num(p.maxHp, 6),
+      n1(p.aim.x), n1(p.aim.y),
+      n1(p.face.x), n1(p.face.y, 1),
+      n1(p.walkPhase),
       p.dead ? 1 : 0,
       p.invuln > 0 ? 1 : 0,
       p.slot, p.coins, p.items.join(','), p.ping || 0,
+      num(p.skin, 0), (p.compass ? 1 : 0) | (p.hasMap ? 2 : 0),
+      num(p.shield, 0), num(p.revives, 0), num(p.keys, 0),
     ];
   }
 
   function eser(e) {
     return [
-      e.id, e.type, r1(e.x), r1(e.y), e.hp, e.maxHp, e.r,
-      r1(e.anim), r1(e.flash), r1(e.dir.x), r1(e.dir.y), e.isBoss ? 1 : 0,
-      r1(e.spawnT || 0),
+      e.id, e.type, n1(e.x), n1(e.y), num(e.hp), num(e.maxHp), num(e.r, 14),
+      n1(e.anim), n1(e.flash), n1(e.dir.x), n1(e.dir.y), e.isBoss ? 1 : 0,
+      n1(e.spawnT),
+      ((e.burn > 0) ? 1 : 0) | ((e.poison > 0) ? 2 : 0) | ((e.slow > 0) ? 4 : 0),
     ];
   }
 
   function bser(b) {
-    return [b.id, r1(b.x), r1(b.y), Math.round(b.vx), Math.round(b.vy), b.r, b.friendly ? 1 : 0, b.color];
+    return [b.id, n1(b.x), n1(b.y), Math.round(num(b.vx)), Math.round(num(b.vy)), num(b.r, 6), b.friendly ? 1 : 0, b.color];
   }
 
   function kser(k) {
-    return [k.id, k.type, r1(k.x), r1(k.y), k.price || 0];
+    return [k.id, k.type, n1(k.x), n1(k.y), k.price || 0];
   }
 
   function dser(d) {
-    return [d.id, d.itemId, r1(d.x), r1(d.y), d.taken ? 1 : 0, d.price || 0];
+    return [d.id, d.itemId, n1(d.x), n1(d.y), d.taken ? 1 : 0, d.price || 0];
   }
 
   function serialState() {
@@ -941,6 +1553,10 @@
       b: G.bullets.map(bser),
       k: (room && room.pickups || []).map(kser),
       d: (room && room.pedestals || []).map(dser),
+      lk: room && room.locks ? [
+        room.locks.up ? 1 : 0, room.locks.down ? 1 : 0,
+        room.locks.left ? 1 : 0, room.locks.right ? 1 : 0,
+      ] : null,
       fx: G.fxSend,
       kills: G.stats.kills,
     };
@@ -960,33 +1576,40 @@
       players: (s.p || []).map((a) => ({
         kind: 'player',
         id: a[0], name: a[1], color: a[2],
-        x: a[3], y: a[4], hp: a[5], maxHp: a[6],
-        aim: { x: a[7], y: a[8] },
-        face: { x: a[9], y: a[10] },
-        walkPhase: a[11],
+        x: num(a[3]), y: num(a[4]), hp: num(a[5]), maxHp: num(a[6], 6),
+        aim: { x: num(a[7]), y: num(a[8], 1) },
+        face: { x: num(a[9]), y: num(a[10], 1) },
+        walkPhase: num(a[11]),
         dead: !!a[12], invuln: a[13] ? 1 : 0,
         slot: a[14], coins: a[15],
         items: a[16] ? String(a[16]).split(',') : [],
         ping: a[17] || 0,
-        r: 15,
+        skin: num(a[18]),
+        armor: 0,
+        compass: !!(a[19] & 1), hasMap: !!(a[19] & 2),
+        shield: num(a[20]), revives: num(a[21]), keys: num(a[22]),
+        r: 12,
       })),
       enemies: (s.e || []).map((a) => ({
-        kind: 'enemy', id: a[0], type: a[1], x: a[2], y: a[3],
-        hp: a[4], maxHp: a[5], r: a[6], anim: a[7], flash: a[8],
-        dir: { x: a[9], y: a[10] }, isBoss: !!a[11], spawnT: a[12] || 0,
+        kind: 'enemy', id: a[0], type: a[1], x: num(a[2]), y: num(a[3]),
+        hp: num(a[4], 1), maxHp: num(a[5], 1), r: num(a[6], 14),
+        anim: num(a[7]), flash: num(a[8]),
+        dir: { x: num(a[9]), y: num(a[10]) }, isBoss: !!a[11], spawnT: num(a[12]),
+        st: a[13] || 0,
         color: (E.ENEMY_TYPES[a[1]] || E.ENEMY_TYPES.fly).color,
       })),
       bullets: (s.b || []).map((a) => ({
-        kind: 'bullet', id: a[0], x: a[1], y: a[2], vx: a[3], vy: a[4],
-        r: a[5], friendly: !!a[6], color: a[7],
+        kind: 'bullet', id: a[0], x: num(a[1]), y: num(a[2]), vx: num(a[3]), vy: num(a[4]),
+        r: num(a[5], 6), friendly: !!a[6], color: a[7],
       })),
       pickups: (s.k || []).map((a) => ({
-        kind: 'pickup', id: a[0], type: a[1], x: a[2], y: a[3], r: a[1] === 'trapdoor' ? 26 : 13,
+        kind: 'pickup', id: a[0], type: a[1], x: num(a[2]), y: num(a[3]), r: a[1] === 'trapdoor' ? 26 : 13,
         price: a[4], bob: 0,
       })),
       pedestals: (s.d || []).map((a) => ({
-        kind: 'pedestal', id: a[0], itemId: a[1], x: a[2], y: a[3], taken: !!a[4], price: a[5], bob: 0,
+        kind: 'pedestal', id: a[0], itemId: a[1], x: num(a[2]), y: num(a[3]), taken: !!a[4], price: a[5], bob: 0,
       })),
+      locks: s.lk ? { up: !!s.lk[0], down: !!s.lk[1], left: !!s.lk[2], right: !!s.lk[3] } : null,
       fx: s.fx || [],
     };
   }
@@ -1050,6 +1673,8 @@
       G.room.cleared = data.cleared;
       G.room.pickups = data.pickups;
       G.room.pedestals = data.pedestals;
+      if (data.locks) G.room.locks = data.locks;
+      else if (!G.room.locks) G.room.locks = { up: false, down: false, left: false, right: false };
     }
     if (roomChanged) {
       G.bullets = [];
@@ -1075,11 +1700,12 @@
       const fresh = lp.srvX == null;      // primer estado recibido
       const px = lp.x, py = lp.y;         // conservar la posición predicha
       Object.assign(lp, mine);            // aplicar hp, objetos, apuntado… del servidor
+      if (E.recomputeStats) E.recomputeStats(lp); // números idénticos al anfitrión
       if (fresh || roomChanged) { lp.x = mine.x; lp.y = mine.y; }
       else { lp.x = px; lp.y = py; }
       lp.srvX = mine.x;
       lp.srvY = mine.y;
-      lp.r = 15;
+      lp.r = 12;
     }
 
     // avisos de muerte / jefe
@@ -1116,17 +1742,43 @@
   // ---------------------------------------------------------
   function minimapData() {
     if (!G.dungeon) return [];
+    const anyMap = G.players.some((p) => p.hasMap);
+    const anyCompass = G.players.some((p) => p.compass);
+    const bossRoom = G.dungeon.rooms[G.dungeon.bossKey];
+
+    // una sala "frontera" es una sin explorar pegada a una explorada
+    const isFrontier = (r) => {
+      if (!r || r.visited) return false;
+      for (const d of Dungeon.DIRS) {
+        if (!r.doors[d.n]) continue;
+        const nb = Dungeon.get(G.dungeon, r.gx + d.dx, r.gy + d.dy);
+        if (nb && nb.visited) return true;
+      }
+      return false;
+    };
+    const bossHinted = (r) => !!(anyCompass && r === bossRoom && !r.visited && !anyMap);
+    const include = (r) => !!(r && (r.visited || anyMap || isFrontier(r) || bossHinted(r)));
+
+    const included = new Set();
+    for (const r of G.dungeon.list) if (include(r)) included.add(r.key);
+
     const out = [];
     for (const r of G.dungeon.list) {
-      if (!r.visited) continue;
+      if (!included.has(r.key)) continue;
+      const visited = r.visited || anyMap;
       const north = Dungeon.get(G.dungeon, r.gx, r.gy - 1);
       const west = Dungeon.get(G.dungeon, r.gx - 1, r.gy);
       out.push({
-        gx: r.gx, gy: r.gy, type: r.type,
-        visited: r.visited, cleared: r.cleared,
+        gx: r.gx, gy: r.gy,
+        type: visited ? r.type : 'unknown',
+        visited,
+        frontier: !visited && isFrontier(r),
+        bossHint: !visited && bossHinted(r),
+        cleared: visited && r.cleared,
         doors: r.doors,
-        northVisited: !!(north && north.visited),
-        westVisited: !!(west && west.visited),
+        locks: r.locks ? ((r.locks.up ? 1 : 0) | (r.locks.down ? 2 : 0) | (r.locks.left ? 4 : 0) | (r.locks.right ? 8 : 0)) : 0,
+        northVisited: !!(r.doors.up && north && included.has(north.key)),
+        westVisited: !!(r.doors.left && west && included.has(west.key)),
         current: r.gx === G.gx && r.gy === G.gy,
       });
     }
@@ -1175,6 +1827,24 @@
             x: G.localPlayer.x, y: G.localPlayer.y,
             face: G.localPlayer.face, aim: G.localPlayer.aim,
             walkPhase: G.localPlayer.walkPhase,
+            // estadísticas reales (para el globo de objetos y el HUD)
+            damage: G.localPlayer.damage, fireRate: G.localPlayer.fireRate,
+            speed: G.localPlayer.speed, bulletSpeed: G.localPlayer.bulletSpeed,
+            bulletSize: G.localPlayer.bulletSize, extraShots: G.localPlayer.extraShots,
+            range: G.localPlayer.range, luck: G.localPlayer.luck,
+            regen: G.localPlayer.regen, armor: G.localPlayer.armor,
+            shield: G.localPlayer.shield, revives: G.localPlayer.revives,
+            keys: G.localPlayer.keys,
+            piercing: G.localPlayer.piercing, homing: G.localPlayer.homing,
+            bounce: G.localPlayer.bounce, lifesteal: G.localPlayer.lifesteal,
+            compass: G.localPlayer.compass, hasMap: G.localPlayer.hasMap,
+            // efectos únicos (para el globo de sinergias y el HUD)
+            burn: G.localPlayer.burn, poison: G.localPlayer.poison, freeze: G.localPlayer.freeze,
+            chain: G.localPlayer.chain, explode: G.localPlayer.explode, boomerang: G.localPlayer.boomerang,
+            familiars: G.localPlayer.familiars, magnet: G.localPlayer.magnet, charger: G.localPlayer.charger,
+            thorns: G.localPlayer.thorns, doubleTap: G.localPlayer.doubleTap, greed: G.localPlayer.greed,
+            pushback: G.localPlayer.pushback, potency: G.localPlayer.potency, prism: G.localPlayer.prism,
+            items: G.localPlayer.items,
           });
         }
       }
@@ -1257,7 +1927,8 @@
     lps.forEach((lp, i) => {
       const p = E.createPlayer(lp.id, {
         name: lp.name,
-        color: lp.color || E.COLORS[i % E.COLORS.length],
+        color: lp.color || E.skinColor(lp.skin || i),
+        skin: lp.skin != null ? lp.skin : i,
         slot: lp.slot != null ? lp.slot : i,
         scheme: lp.scheme || 'p1',
         local: true,
@@ -1269,7 +1940,7 @@
 
     // 'host' recibe además los jugadores remotos por red
     if (opts.remotePlayers) {
-      for (const rp of opts.remotePlayers) addRemotePlayer(rp.id, rp.name);
+      for (const rp of opts.remotePlayers) addRemotePlayer(rp.id, rp.name, rp.skin);
     }
 
     enterRoom(startRoom);
@@ -1283,12 +1954,12 @@
     }
   }
 
-  function addRemotePlayer(id, name) {
+  function addRemotePlayer(id, name, skin) {
     if (G.players.find((p) => p.id === id)) return null;
     const slot = slotFree();
     const p = E.createPlayer(id, {
       name: name || ('Jugador ' + (G.players.length + 1)),
-      color: E.COLORS[slot % E.COLORS.length],
+      skin: skin != null ? skin : (slot + 1),
       slot,
       scheme: 'p1',
       local: false,

@@ -30,6 +30,8 @@
     btnStartHost: $('#btn-start-host'),
     joinCode: $('#join-code'),
     joinStatus: $('#join-status'),
+    playerNameInput: $('#player-name'),
+    joinName: $('#join-name'),
     toast: $('#toast'),
   };
 
@@ -94,6 +96,26 @@
   }
 
   // ---------------------------------------------------------
+  // Nombre del jugador
+  // ---------------------------------------------------------
+  function sanitizeName(v) {
+    return String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, 14);
+  }
+
+  // Nombre efectivo del jugador local (o el de reserva si está vacío)
+  function myName(fallback) {
+    return sanitizeName(playerName) || fallback;
+  }
+
+  function loadSavedName() {
+    try { return localStorage.getItem('llanto-name') || ''; } catch (e) { return ''; }
+  }
+
+  function saveName(n) {
+    try { localStorage.setItem('llanto-name', n); } catch (e) {}
+  }
+
+  // ---------------------------------------------------------
   // Lobby
   // ---------------------------------------------------------
   function renderLobby() {
@@ -120,7 +142,7 @@
   }
 
   function localHostPeer() {
-    return { id: 'host', name: 'Tú (anfitrión)', color: Entities.COLORS[0], isHost: true };
+    return { id: 'host', name: myName('Anfitrión'), color: Entities.COLORS[0], isHost: true };
   }
 
   // ---------------------------------------------------------
@@ -132,7 +154,7 @@
     Game.setHandlers({ onEnd: onGameEnd, onPing: null });
     Game.start({
       mode: 'local',
-      localPlayers: [{ id: 'p0', name: 'Isaac', color: Entities.COLORS[0], slot: 0, scheme: 'p1' }],
+      localPlayers: [{ id: 'p0', name: myName('Isaac'), color: Entities.COLORS[0], slot: 0, scheme: 'p1' }],
     });
     setScene('playing');
   }
@@ -144,7 +166,7 @@
     Game.start({
       mode: 'local',
       localPlayers: [
-        { id: 'p0', name: 'Isaac', color: Entities.COLORS[0], slot: 0, scheme: 'p1' },
+        { id: 'p0', name: myName('Isaac'), color: Entities.COLORS[0], slot: 0, scheme: 'p1' },
         { id: 'p1', name: 'Magdalena', color: Entities.COLORS[1], slot: 1, scheme: 'p2' },
       ],
     });
@@ -270,7 +292,7 @@
       mode: 'host',
       seed,
       floorNum: 1,
-      localPlayers: [{ id: 'host', name: 'Anfitrión', color: Entities.COLORS[0], slot: 0, scheme: 'p1' }],
+      localPlayers: [{ id: 'host', name: myName('Anfitrión'), color: Entities.COLORS[0], slot: 0, scheme: 'p1' }],
       remotePlayers: remote,
     });
     Net.broadcast({ t: 'start', seed, floor: 1 });
@@ -298,7 +320,7 @@
     Net.join(code, {
       onOpen() {
         ui.joinStatus.textContent = 'Conectado. Entrando…';
-        Net.sendToHost({ t: 'hello', name: playerName });
+        Net.sendToHost({ t: 'hello', name: myName('Jugador') });
       },
       onData(msg) {
         handleClientData(msg);
@@ -376,7 +398,7 @@
       seed: hostSeed,
       floorNum: hostFloor,
       localId: myClientId,
-      localPlayers: [{ id: myClientId, name: playerName, color: Entities.COLORS[1], slot: 1, scheme: 'p1' }],
+      localPlayers: [{ id: myClientId, name: myName('Jugador'), color: Entities.COLORS[1], slot: 1, scheme: 'p1' }],
     });
     setScene('playing');
   }
@@ -564,8 +586,20 @@
       } catch (e) {}
     });
 
-    // nombre aleatorio de jugador
-    playerName = 'Jugador ' + (1 + Math.floor(Math.random() * 9));
+    // nombre del jugador (editable y recordado; dos campos sincronizados)
+    playerName = loadSavedName() || 'Jugador ' + (1 + Math.floor(Math.random() * 9));
+    ui.playerNameInput.value = playerName;
+    ui.joinName.value = playerName;
+    ui.playerNameInput.addEventListener('input', () => {
+      playerName = sanitizeName(ui.playerNameInput.value);
+      ui.joinName.value = playerName;
+    });
+    ui.joinName.addEventListener('input', () => {
+      playerName = sanitizeName(ui.joinName.value);
+      ui.playerNameInput.value = playerName;
+    });
+    ui.playerNameInput.addEventListener('change', () => saveName(playerName));
+    ui.joinName.addEventListener('change', () => saveName(playerName));
   }
 
   function copyText(txt) {

@@ -1062,18 +1062,24 @@
     // estado del jugador local
     const mine = data.players.find((p) => p.id === G.localId);
     if (mine) {
-      if (!G.localPlayer) G.localPlayer = mine;
-      else {
-        const px = G.localPlayer.x, py = G.localPlayer.y;
-        Object.assign(G.localPlayer, mine);
-        G.localPlayer.x = px; G.localPlayer.y = py;
-        if (roomChanged || G.localPlayer.srvX == null) {
-          G.localPlayer.x = mine.x; G.localPlayer.y = mine.y;
-        }
+      // El jugador local debe ser una entidad completa (con speed, cadencias…),
+      // no el objeto plano serializado: si no, la predicción produce NaN.
+      let lp = G.localPlayer || G.players.find((p) => p.id === G.localId);
+      if (!lp) {
+        lp = E.createPlayer(G.localId, {
+          name: mine.name, color: mine.color, slot: mine.slot, scheme: 'p1', local: true,
+        });
+        G.players.push(lp);
       }
-      G.localPlayer.srvX = mine.x;
-      G.localPlayer.srvY = mine.y;
-      G.localPlayer.r = 15;
+      G.localPlayer = lp;
+      const fresh = lp.srvX == null;      // primer estado recibido
+      const px = lp.x, py = lp.y;         // conservar la posición predicha
+      Object.assign(lp, mine);            // aplicar hp, objetos, apuntado… del servidor
+      if (fresh || roomChanged) { lp.x = mine.x; lp.y = mine.y; }
+      else { lp.x = px; lp.y = py; }
+      lp.srvX = mine.x;
+      lp.srvY = mine.y;
+      lp.r = 15;
     }
 
     // avisos de muerte / jefe

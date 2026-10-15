@@ -29,6 +29,10 @@
       <div class="panel">
         <h1 class="title">Llanto de <span>Isaac</span></h1>
         <p class="subtitle">Prototipo de roguelike 2D · salas de 1 a 4 jugadores</p>
+        <div class="name-field">
+          <label for="player-name">Tu nombre</label>
+          <input id="player-name" class="name-input" maxlength="14" autocomplete="off" spellcheck="false" placeholder="Isaac">
+        </div>
         <div class="buttons">
           <button class="btn primary" data-action="solo">▶ Jugar solo</button>
           <button class="btn" data-action="coop">👥 Cooperativo local (2p)</button>
@@ -100,6 +104,10 @@
       <div class="panel">
         <h2>Unirse a una sala</h2>
         <p class="subtitle">Escribe el código de 4 caracteres</p>
+        <div class="name-field">
+          <label for="join-name">Tu nombre</label>
+          <input id="join-name" class="name-input" maxlength="14" autocomplete="off" spellcheck="false" placeholder="Isaac">
+        </div>
         <input id="join-code" class="code-input" maxlength="4" autocomplete="off" spellcheck="false" placeholder="ABCD">
         <p id="join-status" class="status"></p>
         <div class="buttons row">

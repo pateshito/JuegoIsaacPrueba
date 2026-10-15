@@ -22,6 +22,8 @@ El objetivo es sencillo: baja los **3 pisos** del calabozo, derrota al **jefe** 
 
 ## ▶️ Cómo jugar
 
+Antes de empezar, escribe tu **nombre** en el campo **Tu nombre** del menú (también aparece en la pantalla *Unirse a una sala*). Se recuerda en el navegador y se usa en todos los modos: en solitario, cooperativo local y online.
+
 ### En solitario
 1. Abre el juego.
 2. Pulsa **Jugar solo**.
@@ -31,7 +33,7 @@ El objetivo es sencillo: baja los **3 pisos** del calabozo, derrota al **jefe** 
 
 ### Online (1 a 4 jugadores)
 1. **Anfitrión**: pulsa **Crear sala online**. Aparecerá un **código de 4 caracteres**; compártelo (botones *Copiar código* / *Copiar enlace*).
-2. **Los demás**: pulsen **Unirse a una sala**, escriban el código y pulsen **Conectar**.
+2. **Los demás**: pulsen **Unirse a una sala**, escriban el código y su nombre, y pulsen **Conectar**.
 3. Cuando todos estén en la sala de espera, el anfitrión pulsa **Comenzar partida**.
 
 > También puedes entrar directo con un enlace del tipo `https://tu-usuario.github.io/tu-repo/?sala=ABCD`.

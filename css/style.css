@@ -137,6 +137,27 @@ p{margin:6px 0;color:var(--dim);font-size:14px;line-height:1.55}
 .buttons{display:flex;flex-direction:column;gap:9px;margin-top:8px}
 .buttons.row{flex-direction:row;justify-content:center;flex-wrap:wrap;margin-top:18px}
 
+/* ---------------- Campo de nombre ---------------- */
+.name-field{margin:0 0 14px;text-align:left}
+.name-field label{
+  display:block;margin:0 0 6px 2px;
+  font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;
+  color:var(--accent);
+}
+.name-input{
+  width:100%;
+  font:inherit;font-size:16px;font-weight:600;
+  color:var(--ink);
+  background:#140f1d;
+  border:2px solid #3a2f4d;
+  border-radius:11px;
+  padding:10px 12px;
+  outline:none;
+  transition:border-color .15s,box-shadow .15s;
+}
+.name-input:focus{border-color:var(--accent);box-shadow:0 0 0 4px rgba(255,182,72,.13)}
+.name-input::placeholder{color:#423553}
+
 .btn{
   appearance:none;
   font:inherit;font-size:15px;font-weight:600;

@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Llanto de Isaac · Roguelike 2D</title>
+<meta name="description" content="Prototipo de roguelike 2D inspirado en The Binding of Isaac. Juega solo, cooperativo local u online de 1 a 4 jugadores.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%2317131f'/><circle cx='16' cy='13' r='7' fill='%23f2d0a4'/><circle cx='13' cy='12' r='1.6' fill='%2317131f'/><circle cx='19' cy='12' r='1.6' fill='%2317131f'/><path d='M16 20c-3 0-6 2-6 5s2 5 5 5h2c3 0 5-2 5-5s-3-5-6-5z' fill='%23cfe3ff'/></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+  <div id="stage">
+    <canvas id="game" width="960" height="540" aria-label="Área de juego"></canvas>
+
+    <!-- Barra superior: solo visible durante la partida -->
+    <div id="topbar" class="hidden">
+      <span id="tb-room" class="tag"></span>
+      <span id="tb-ping" class="tag"></span>
+      <span class="spacer"></span>
+      <button id="btn-mute" class="icon-btn" title="Silenciar (M)">🔊</button>
+      <button id="btn-pause" class="icon-btn" title="Pausa (Esc)">⏸</button>
+      <button id="btn-quit" class="icon-btn" title="Salir de la partida">✕</button>
+    </div>
+
+    <!-- ============ MENÚ PRINCIPAL ============ -->
+    <div id="ov-main" class="overlay">
+      <div class="panel">
+        <h1 class="title">Llanto de <span>Isaac</span></h1>
+        <p class="subtitle">Prototipo de roguelike 2D · salas de 1 a 4 jugadores</p>
+        <div class="buttons">
+          <button class="btn primary" data-action="solo">▶ Jugar solo</button>
+          <button class="btn" data-action="coop">👥 Cooperativo local (2p)</button>
+          <button class="btn" data-action="host">🌐 Crear sala online</button>
+          <button class="btn" data-action="join">🔗 Unirse a una sala</button>
+          <button class="btn ghost" data-action="help">? Controles y ayuda</button>
+        </div>
+        <p class="foot">Flechas para disparar · WASD para moverte</p>
+      </div>
+    </div>
+
+    <!-- ============ AYUDA ============ -->
+    <div id="ov-help" class="overlay hidden">
+      <div class="panel wide">
+        <h2>Controles y ayuda</h2>
+        <div class="cols">
+          <div class="col">
+            <h3>Jugador 1</h3>
+            <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> moverse</p>
+            <p><kbd>↑</kbd><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd> disparar</p>
+            <h3>Jugador 2 (coop local)</h3>
+            <p><kbd>I</kbd><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd> moverse</p>
+            <p><kbd>T</kbd><kbd>F</kbd><kbd>G</kbd><kbd>H</kbd> disparar</p>
+          </div>
+          <div class="col">
+            <h3>Cómo se juega</h3>
+            <p>Entra a cada habitación y derrota a todos los enemigos para abrir las puertas.</p>
+            <p>Explora el mapa (arriba a la derecha) y busca la habitación del <b>jefe</b>.</p>
+            <p>Derrota al jefe y pisa la trampilla para bajar de piso. Hay 3 pisos.</p>
+            <p>Recoge <b>corazones</b> (rojo = vida, medio = media), <b>monedas</b> y objetos de los pedestales.</p>
+            <p>Cada jugador empieza con 3 corazones. Si todos caen, fin de la partida.</p>
+          </div>
+          <div class="col">
+            <h3>Online</h3>
+            <p>El anfitrión crea una sala y comparte el <b>código de 4 letras</b>.</p>
+            <p>Los demás se unen escribiendo ese código. Se puede entrar con la partida en marcha.</p>
+            <p>La conexión es <b>P2P (WebRTC)</b> mediante el bróker público de PeerJS: no hay servidor propio.</p>
+            <p>Si tu red bloquea P2P, prueba otro WiFi o usa datos móviles.</p>
+          </div>
+        </div>
+        <div class="buttons row">
+          <button class="btn" data-action="back">← Volver</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ LOBBY ============ -->
+    <div id="ov-lobby" class="overlay hidden">
+      <div class="panel">
+        <h2>Sala de espera</h2>
+        <p class="subtitle">Comparte este código con tus amigos</p>
+        <div class="roomcode" id="lobby-code">----</div>
+        <div class="share">
+          <button class="btn small" id="btn-copy">📋 Copiar código</button>
+          <button class="btn small" id="btn-copy-link">🔗 Copiar enlace</button>
+        </div>
+        <h3 style="margin-top:18px">Jugadores <span id="lobby-count">1/4</span></h3>
+        <ul id="lobby-players" class="players"></ul>
+        <p id="lobby-status" class="status">Esperando a que se conecten…</p>
+        <div class="buttons row">
+          <button class="btn primary" data-action="start-host" id="btn-start-host">▶ Comenzar partida</button>
+          <button class="btn ghost" data-action="leave">Salir</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ UNIRSE ============ -->
+    <div id="ov-join" class="overlay hidden">
+      <div class="panel">
+        <h2>Unirse a una sala</h2>
+        <p class="subtitle">Escribe el código de 4 caracteres</p>
+        <input id="join-code" class="code-input" maxlength="4" autocomplete="off" spellcheck="false" placeholder="ABCD">
+        <p id="join-status" class="status"></p>
+        <div class="buttons row">
+          <button class="btn primary" data-action="do-join">Conectar</button>
+          <button class="btn ghost" data-action="back">← Volver</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ PAUSA ============ -->
+    <div id="ov-pause" class="overlay hidden">
+      <div class="panel">
+        <h2>Pausa</h2>
+        <div class="buttons">
+          <button class="btn primary" data-action="resume">▶ Continuar</button>
+          <button class="btn ghost" data-action="quit">✕ Abandonar partida</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ FIN DE PARTIDA ============ -->
+    <div id="ov-end" class="overlay hidden">
+      <div class="panel">
+        <h2 id="end-title">Fin de la partida</h2>
+        <p class="subtitle" id="end-text"></p>
+        <div class="buttons">
+          <button class="btn primary" data-action="retry">↻ Jugar otra vez</button>
+          <button class="btn ghost" data-action="menu">⌂ Menú principal</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+  </div>
+</div>
+
+<!-- PeerJS: bróker público para el emparejamiento WebRTC (solo online) -->
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js" crossorigin="anonymous"></script>
+
+<script src="js/utils.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/input.js"></script>
+<script src="js/entities.js"></script>
+<script src="js/dungeon.js"></script>
+<script src="js/render.js"></script>
+<script src="js/net.js"></script>
+<script src="js/game.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

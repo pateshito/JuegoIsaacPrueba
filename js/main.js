@@ -76,8 +76,8 @@
   // ---------------------------------------------------------
   // Utilidades de interfaz
   // ---------------------------------------------------------
-  function show(el) { el.classList.remove('hidden'); }
-  function hide(el) { el.classList.add('hidden'); }
+  function show(el) { if (el) el.classList.remove('hidden'); }
+  function hide(el) { if (el) el.classList.add('hidden'); }
 
   function toast(msg, ms) {
     ui.toast.textContent = msg;

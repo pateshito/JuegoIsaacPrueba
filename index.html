@@ -1,12 +1,13 @@
- <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<title>Roguelike Arena· Roguelike 2D</title>
-<meta name="description" content="Prototipo de roguelike 2D inspirado en The Binding of Isaac. Juega solo, cooperativo local u online de 1 a 4 jugadores.">
+<title>RogueLike Arena 2D</title>
+<meta name="description" content="Roguelike 2D con salas de 1 a 4 jugadores. Cooperativo online, personajes únicos y generación procedural.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%2317131f'/><circle cx='16' cy='13' r='7' fill='%23f2d0a4'/><circle cx='13' cy='12' r='1.6' fill='%2317131f'/><circle cx='19' cy='12' r='1.6' fill='%2317131f'/><path d='M16 20c-3 0-6 2-6 5s2 5 5 5h2c3 0 5-2 5-5s-3-5-6-5z' fill='%23cfe3ff'/></svg>">
+<!-- NOTA: Si tus archivos están dentro de carpetas, cambia href="style.css" a href="css/style.css" y los src de los scripts a "js/..." -->
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -26,34 +27,88 @@
 
     <!-- ============ MENÚ PRINCIPAL ============ -->
     <div id="ov-main" class="overlay">
-      <div class="panel">
-        <h1 class="title">Llanto de <span>Isaac</span></h1>
-        <p class="subtitle">Prototipo de roguelike 2D · salas de 1 a 4 jugadores</p>
-        <div class="name-field">
-          <label for="player-name">Tu nombre</label>
-          <input id="player-name" class="name-input" maxlength="14" autocomplete="off" spellcheck="false" placeholder="Isaac">
-        </div>
-        <div class="meta-bar">
-          <span class="meta-coins">🪙 <b id="menu-coins">0</b> monedas</span>
-          <span class="meta-sep">·</span>
-          <span class="meta-ach">🏆 <b id="menu-ach">0</b>/<span id="menu-ach-total">12</span></span>
-        </div>
-        <div class="skin-field">
-          <label>Tu personaje</label>
-          <div id="char-picker" class="chars" role="listbox" aria-label="Personajes"></div>
-        </div>
-        <div class="buttons">
-          <button class="btn primary" data-action="solo">▶ Jugar solo</button>
-          <button class="btn" data-action="coop">👥 Cooperativo local (2p)</button>
-          <button class="btn" data-action="host">🌐 Crear sala online</button>
-          <button class="btn" data-action="join">🔗 Unirse a una sala</button>
-          <div class="btn-row">
-            <button class="btn small" data-action="shop">🛒 Tienda de personajes</button>
-            <button class="btn small" data-action="progress">🏆 Progreso y logros</button>
-            <button class="btn small ghost" data-action="help">? Ayuda</button>
+      <div class="panel wide">
+        <h1 class="title">Rogue<span>Like</span>Arena 2D</h1>
+        <p class="subtitle">Roguelike 2D · Salas de 1 a 4 jugadores · Cooperativo online</p>
+        
+        <div class="main-grid">
+          <div class="main-left">
+            <div class="name-field">
+              <label for="player-name">Tu nombre</label>
+              <input id="player-name" class="name-input" maxlength="14" autocomplete="off" spellcheck="false" placeholder="Jugador">
+            </div>
+            
+            <div class="meta-bar">
+              <span class="meta-ach">🏆 <b id="menu-ach">0</b> / <span id="menu-ach-total">13</span> Logros</span>
+            </div>
+
+            <div class="buttons">
+              <button class="btn primary" data-action="solo">▶ Jugar Solitario</button>
+              <button class="btn" data-action="host">🌐 Crear sala online</button>
+              <button class="btn" data-action="join">🔗 Unirse a una sala</button>
+              
+              <div class="btn-row" style="margin-top: 16px;">
+                <button class="btn small" data-action="challenges">🔥 Desafíos</button>
+                <button class="btn small" data-action="progress">🏆 Progreso y logros</button>
+                <button class="btn small ghost" data-action="help">? Ayuda</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="main-right">
+            <label class="pick-label">Tu personaje</label>
+            <div id="char-picker" class="chars" role="listbox" aria-label="Personajes"></div>
+            <div id="char-detail" class="char-detail"></div>
+            <div class="cd-actions">
+              <button class="btn small primary" data-action="shop">Elegir personaje / Galería</button>
+            </div>
           </div>
         </div>
-        <p class="foot">WASD moverse · Flechas disparar · <kbd>Espacio</kbd> habilidad · <kbd>Tab</kbd> ver mejoras · M silencia</p>
+      </div>
+    </div>
+
+    <!-- ============ GALERÍA DE PERSONAJES ============ -->
+    <div id="ov-shop" class="overlay hidden">
+      <div class="panel wide">
+        <h2>Galería de personajes</h2>
+        <p class="subtitle">Explora el roster, prueba personajes en la sala de pruebas y descubre cómo desbloquearlos cumpliendo retos.</p>
+        <div class="roster">
+          <div id="shop-grid" class="roster-grid"></div>
+          <div id="roster-detail" class="roster-detail"></div>
+        </div>
+        <div class="buttons row">
+          <button class="btn ghost" data-action="back">← Volver</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ DESAFÍOS ============ -->
+    <div id="ov-challenges" class="overlay hidden">
+      <div class="panel wide">
+        <h2>Desafíos</h2>
+        <p class="subtitle">Retos con modificadores. ¡Supéralos para desbloquear personajes únicos!</p>
+        <div id="chall-list" class="chall-list"></div>
+        <div class="buttons row">
+          <button class="btn ghost" data-action="back">← Volver</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ PROGRESO Y LOGROS ============ -->
+    <div id="ov-progress" class="overlay hidden">
+      <div class="panel wide">
+        <h2>Progreso y logros</h2>
+        <div class="meta-bar">
+          <span class="meta-ach">Logros <b id="prog-ach-count">0/13</b></span>
+        </div>
+        <div id="prog-stats" class="prog-stats"></div>
+        <h3>Logros</h3>
+        <ul id="ach-list" class="ach-list"></ul>
+        <div class="buttons row danger-row">
+          <button class="btn small danger" data-action="wipe-ach">🧹 Borrar logros</button>
+          <button class="btn small danger" data-action="wipe-all">⚠ Borrar TODO el progreso</button>
+          <button class="btn ghost" data-action="back">← Volver</button>
+        </div>
       </div>
     </div>
 
@@ -63,51 +118,40 @@
         <h2>Controles y ayuda</h2>
         <div class="cols">
           <div class="col">
-            <h3>Jugador 1</h3>
+            <h3>Controles</h3>
             <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> moverse</p>
             <p><kbd>↑</kbd><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd> disparar</p>
             <p><kbd>Espacio</kbd> habilidad activa</p>
             <p><kbd>Tab</kbd> (mantener) ver mejoras</p>
-            <h3>Jugador 2 (coop local)</h3>
-            <p><kbd>I</kbd><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd> moverse</p>
-            <p><kbd>T</kbd><kbd>F</kbd><kbd>G</kbd><kbd>H</kbd> disparar</p>
-            <p><kbd>Y</kbd> habilidad activa</p>
+            <p><kbd>M</kbd> silenciar sonido</p>
+            <p><kbd>H</kbd> mostrar hitboxes (depuración)</p>
           </div>
           <div class="col">
             <h3>Cómo se juega</h3>
             <p>Entra a cada habitación y derrota a todos los enemigos para abrir las puertas.</p>
-            <p>Al entrar en una sala los enemigos no hacen daño durante un instante: aprovecha para reaccionar.</p>
-            <p>Explora el mapa (arriba a la derecha) y busca la habitación del <b>jefe</b>.</p>
-            <p>Derrota al jefe y pisa la trampilla para bajar de piso. Hay <b>9 pisos</b>, <b>cada uno con sus diseños</b> y un jefe distinto.</p>
-            <p>Los enemigos <b>ya no sueltan objetos</b>: la recompensa (monedas, corazones y llaves) aparece al <b>despejar la habitación</b>.</p>
-            <p>Al limpiar una sala a veces aparece un <b>cofre</b>: los <b>gratis</b> dan consumibles y los <b>cerrados con llave 🔑</b> dan un objeto para el equipo.</p>
-            <p>Recoge <b>corazones</b> (curan a todo el equipo), <b>monedas</b> y <b>llaves</b> (compartidas) y objetos de los pedestales.</p>
-            <p>Los objetos son <b>del equipo</b>: los comparten todos los jugadores. Con <kbd>Tab</kbd> ves tus mejoras y qué hacen.</p>
-            <p>Cada personaje tiene <b>estadísticas propias</b>, una <b>pasiva</b> y una <b>habilidad activa</b> con cargas. Limpiar una sala recorta su enfriamiento.</p>
-            <p>Los objetos tienen <b>rareza</b>: común, poco común, raro, épico y <b>legendario</b>. Cuanto más raro, menos probable.</p>
-            <p>Acércate a un pedestal y verás un <b>globo</b> con el nombre, la rareza y lo que suma o resta.</p>
-            <p>Muchos objetos dan <b>habilidades únicas</b> además de estadísticas: fuego, veneno, hielo, explosiones, rayos en cadena, bumerán, moscas familiares, imán, golpe cargado, espinas, ráfaga doble, codicia y empuje.</p>
-            <p>Las habilidades <b>sinergizan</b> entre sí: por ejemplo fuego + veneno = «Nube tóxica ardiente». El globo te avisa con <b>⚡ Sinergia</b> cuando un objeto activará una combinación.</p>
-            <p>Las puertas con <b>candado dorado</b> necesitan una <b>llave 🔑</b>; pisa hacia ellas para abrirlas.</p>
-            <p>El minimapa marca con <b>«?»</b> las salas contiguas sin explorar, y no se vuelven a ocultar.</p>
-            <p>En cooperativo cada jugador <b>se reanima una vez por piso</b>; en solitario, una vez y después caes.</p>
-            <p>Al terminar una partida ganas <b>monedas de progreso</b> para desbloquear <b>personajes</b> en la Tienda.</p>
+            <p>Explora el mapa y busca la habitación del <b>jefe</b>.</p>
+            <p>Derrota al jefe y pisa la trampilla para bajar de piso. Hay <b>9 pisos</b>.</p>
+            <p>Los enemigos <b>ya no sueltan objetos</b>: la recompensa aparece al <b>despejar la habitación</b>.</p>
+            <p>Al limpiar una sala a veces aparece un <b>cofre</b>: los gratis dan consumibles y los cerrados con llave 🔑 dan un objeto para el equipo.</p>
+            <p>Recoge <b>corazones</b>, <b>monedas</b> y <b>llaves</b> (compartidos por el equipo) y objetos de los pedestales.</p>
+            <p>Cada personaje tiene <b>estadísticas propias</b>, una <b>pasiva</b> y una <b>habilidad activa</b> con cargas. La activa solo se recarga eliminando enemigos.</p>
+            <p>Las puertas con <b>candado dorado</b> necesitan una <b>llave 🔑</b>.</p>
+            <p>El minimapa marca con <b>«?»</b> las salas contiguas sin explorar.</p>
           </div>
           <div class="col">
             <h3>Online</h3>
             <p>El anfitrión crea una sala y comparte el <b>código de 4 letras</b>.</p>
             <p>Los demás se unen escribiendo ese código. Se puede entrar con la partida en marcha.</p>
-            <p>La conexión es <b>P2P (WebRTC)</b> mediante el bróker público de PeerJS: no hay servidor propio.</p>
-            <p>Si tu red bloquea P2P, prueba otro WiFi o usa datos móviles.</p>
+            <p>La conexión es <b>P2P (WebRTC)</b> mediante el bróker público de PeerJS.</p>
           </div>
         </div>
         <div class="buttons row">
-          <button class="btn" data-action="back">← Volver</button>
+          <button class="btn ghost" data-action="back">← Volver</button>
         </div>
       </div>
     </div>
 
-    <!-- ============ LOBBY ============ -->
+    <!-- ============ LOBBY (Crear sala) ============ -->
     <div id="ov-lobby" class="overlay hidden">
       <div class="panel">
         <h2>Sala de espera</h2>
@@ -127,20 +171,24 @@
       </div>
     </div>
 
-    <!-- ============ UNIRSE ============ -->
+    <!-- ============ UNIRSE A SALA ============ -->
     <div id="ov-join" class="overlay hidden">
       <div class="panel">
         <h2>Unirse a una sala</h2>
         <p class="subtitle">Escribe el código de 4 caracteres</p>
-        <div class="name-field">
+        <input id="join-code" class="code-input" maxlength="4" autocomplete="off" spellcheck="false" placeholder="ABCD">
+        
+        <div class="name-field" style="margin-top: 16px;">
           <label for="join-name">Tu nombre</label>
-          <input id="join-name" class="name-input" maxlength="14" autocomplete="off" spellcheck="false" placeholder="Isaac">
+          <input id="join-name" class="name-input" maxlength="14" autocomplete="off" spellcheck="false" placeholder="Jugador">
         </div>
+        
         <div class="skin-field">
           <label>Tu personaje</label>
           <div id="char-picker-join" class="chars" role="listbox" aria-label="Personajes"></div>
         </div>
-        <input id="join-code" class="code-input" maxlength="4" autocomplete="off" spellcheck="false" placeholder="ABCD">
+        <div id="char-detail-join" class="char-detail" style="margin-top: 12px;"></div>
+        
         <p id="join-status" class="status"></p>
         <div class="buttons row">
           <button class="btn primary" data-action="do-join">Conectar</button>
@@ -165,38 +213,10 @@
       <div class="panel">
         <h2 id="end-title">Fin de la partida</h2>
         <p class="subtitle" id="end-text"></p>
-        <p class="end-coins" id="end-coins"></p>
+        <p id="end-unlocked" class="end-unlocked"></p>
         <div class="buttons">
           <button class="btn primary" data-action="retry">↻ Jugar otra vez</button>
           <button class="btn ghost" data-action="menu">⌂ Menú principal</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- ============ TIENDA DE PERSONAJES ============ -->
-    <div id="ov-shop" class="overlay hidden">
-      <div class="panel wide">
-        <h2>Tienda de personajes</h2>
-        <p class="subtitle">Gana <b>monedas de progreso</b> jugando y desbloquea personajes. Cada uno tiene una <b>habilidad activa</b> y una <b>pasiva</b> propias.</p>
-        <div class="shop-coins">🪙 Tienes <b id="shop-coins">0</b> monedas de progreso</div>
-        <div id="shop-grid" class="shop-grid"></div>
-        <div class="buttons row">
-          <button class="btn" data-action="back">← Volver</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- ============ PROGRESO Y LOGROS ============ -->
-    <div id="ov-progress" class="overlay hidden">
-      <div class="panel wide">
-        <h2>Progreso y logros</h2>
-        <div class="prog-stats" id="prog-stats"></div>
-        <h3>Logros <span id="prog-ach-count">0/12</span></h3>
-        <ul id="ach-list" class="ach-list"></ul>
-        <div class="buttons row danger-row">
-          <button class="btn ghost" data-action="wipe-ach">🧹 Borrar logros</button>
-          <button class="btn danger" data-action="wipe-all">⚠ Borrar TODO el progreso</button>
-          <button class="btn" data-action="back">← Volver</button>
         </div>
       </div>
     </div>
@@ -213,8 +233,23 @@
       </div>
     </div>
 
-    <div id="ach-toasts" class="ach-toasts" aria-live="polite"></div>
+    <!-- ============ SALA DE PRUEBAS (Preview) ============ -->
+    <div id="ov-preview" class="overlay hidden">
+      <div class="preview-wrap">
+        <div class="preview-side">
+          <div class="preview-title">Personajes</div>
+          <div id="preview-chars" class="preview-chars"></div>
+          <button class="btn small ghost" data-action="preview-back" style="margin-top:8px">← Volver</button>
+        </div>
+        <div class="preview-stage">
+          <canvas id="preview-canvas" width="960" height="540"></canvas>
+          <div id="preview-info" class="preview-info"></div>
+        </div>
+      </div>
+    </div>
 
+    <!-- ============ NOTIFICACIONES ============ -->
+    <div id="ach-toasts" class="ach-toasts" aria-live="polite"></div>
     <div id="toast" class="toast hidden"></div>
   </div>
 </div>
@@ -222,14 +257,17 @@
 <!-- PeerJS: bróker público para el emparejamiento WebRTC (solo online) -->
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js" crossorigin="anonymous"></script>
 
+<!-- Scripts del juego (El orden es importante para las dependencias) -->
 <script src="js/utils.js"></script>
 <script src="js/audio.js"></script>
-<script src="js/characters.js"></script>
-<script src="js/meta.js"></script>
 <script src="js/input.js"></script>
 <script src="js/entities.js"></script>
+<script src="js/characters.js"></script>
+<script src="js/challenges.js"></script>
+<script src="js/meta.js"></script>
 <script src="js/dungeon.js"></script>
 <script src="js/render.js"></script>
+<script src="js/preview.js"></script>
 <script src="js/net.js"></script>
 <script src="js/game.js"></script>
 <script src="js/main.js"></script>

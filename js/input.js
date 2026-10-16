@@ -30,14 +30,17 @@
   ]);
 
   function onKeyDown(e) {
+    keys[e.code] = true;
+
     if (e.repeat) {
       if (BLOCK.has(e.code)) e.preventDefault();
       return;
     }
-    keys[e.code] = true;
+    
     pressedOnce[e.code] = true;
     if (BLOCK.has(e.code)) e.preventDefault();
   }
+
 
   function onKeyUp(e) {
     keys[e.code] = false;
@@ -45,7 +48,9 @@
   }
 
   function onBlur() {
-    for (const k in keys) keys[k] = false;
+    if (document.hidden) {
+      for (const k in keys) keys[k] = false;
+    }
   }
 
   function attach() {

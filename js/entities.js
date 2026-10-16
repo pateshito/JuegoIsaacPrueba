@@ -14,7 +14,7 @@
   // Colores asignados por orden de entrada
   const COLORS = ['#8fd3ff', '#ffd166', '#a6f28a', '#f79ad3'];
 
-  const NAMES_1 = ['Isaac', 'Magdalena', 'Caín', 'Judas'];
+  const NAMES_1 = ['Devoto', 'Tanque Santa', 'Buscador', 'Sacrificado'];
 
   // ---------------------------------------------------------
   // SKINS (aspecto del personaje; solo visual)
@@ -24,16 +24,16 @@
   // acc    = accesorio dibujado sobre la cabeza
   // ---------------------------------------------------------
   const SKINS = [
-    { id: 'isaac',  name: 'Isaac',     color: '#cfe3ff', skin: '#f2d0a4', eye: '#20182b', acc: null },
-    { id: 'maggy',  name: 'Magdalena', color: '#ffe3c2', skin: '#f6d3b0', eye: '#20182b', acc: 'bow' },
-    { id: 'cain',   name: 'Caín',      color: '#8e7bff', skin: '#e8c9a0', eye: '#20182b', acc: 'headphones' },
-    { id: 'judas',  name: 'Judas',     color: '#ff6b8a', skin: '#e8c9a0', eye: '#20182b', acc: 'horns' },
-    { id: 'azazel', name: 'Azazel',    color: '#5a3568', skin: '#2b1c3a', eye: '#ff4d6d', acc: 'horns' },
-    { id: 'eden',   name: 'Edén',      color: '#a6f28a', skin: '#a8e6cf', eye: '#20182b', acc: 'halo' },
-    { id: 'ghost',  name: 'Fantasma',  color: '#dff1ff', skin: '#eef6ff', eye: '#3a3350', acc: null, ghost: true },
-    { id: 'robot',  name: 'Robot',     color: '#9fb3c8', skin: '#c7d3de', eye: '#39ff88', acc: 'antenna' },
-    { id: 'devil',  name: 'Diablillo', color: '#c0392b', skin: '#e07a5a', eye: '#ffd166', acc: 'horns' },
-    { id: 'angel',  name: 'Ángel',     color: '#fff1c2', skin: '#ffe0b8', eye: '#4a6fa5', acc: 'halo' },
+    { id: 'isaac',  name: 'Devoto',       color: '#cfe3ff', skin: '#f2d0a4', eye: '#20182b', acc: null },
+    { id: 'maggy',  name: 'Tanque Santa', color: '#ffe3c2', skin: '#f6d3b0', eye: '#20182b', acc: 'bow' },
+    { id: 'cain',   name: 'Buscador',     color: '#8e7bff', skin: '#e8c9a0', eye: '#20182b', acc: 'headphones' },
+    { id: 'judas',  name: 'Sacrificado',  color: '#ff6b8a', skin: '#e8c9a0', eye: '#20182b', acc: 'horns' },
+    { id: 'azazel', name: 'Alado',        color: '#5a3568', skin: '#2b1c3a', eye: '#ff4d6d', acc: 'horns' },
+    { id: 'eden',   name: 'Caos',         color: '#a6f28a', skin: '#a8e6cf', eye: '#20182b', acc: 'halo' },
+    { id: 'ghost',  name: 'Espectro',     color: '#dff1ff', skin: '#eef6ff', eye: '#3a3350', acc: null, ghost: true },
+    { id: 'robot',  name: 'Autómata',     color: '#9fb3c8', skin: '#c7d3de', eye: '#39ff88', acc: 'antenna' },
+    { id: 'devil',  name: 'Chupasangre',  color: '#c0392b', skin: '#e07a5a', eye: '#ffd166', acc: 'horns' },
+    { id: 'angel',  name: 'Protectora',   color: '#fff1c2', skin: '#ffe0b8', eye: '#4a6fa5', acc: 'halo' },
   ];
 
   const normSkin = (i) => {
@@ -527,9 +527,18 @@
     return n;
   }
 
+  // Nº de moscas familiares, incluyendo las temporales de la activa "Invocar".
+  function famCount(p) {
+    p = p || {};
+    let n = p.familiars | 0;
+    if (p.buff && p.buff.famT > 0) n += p.buff.fam | 0;
+    return n;
+  }
+
   // ¿Qué efectos "tiene" el jugador? (para decidir sinergias)
   function effectFlags(p) {
     p = p || {};
+    const fam = famCount(p);
     return {
       burn: (p.burn || 0) > 0,
       poison: (p.poison || 0) > 0,
@@ -537,8 +546,8 @@
       chain: (p.chain || 0) > 0,
       explode: (p.explode || 0) > 0,
       boomerang: (p.boomerang || 0) > 0,
-      familiars: (p.familiars || 0) > 0,
-      familiars2: (p.familiars || 0) >= 2,
+      familiars: fam > 0,
+      familiars2: fam >= 2,
       magnet: !!p.magnet,
       charger: !!p.charger,
       thorns: (p.thorns || 0) > 0,
@@ -591,8 +600,8 @@
       shrapnel: has('shrapnel'),
       shatter: has('shatter') ? 1.5 : 1,
       boomerang: f.boomerang ? 1 : 0,
-      familiars: Math.min(3, p.familiars | 0),
-      familiarDmg: f.familiars ? 3 + Math.max(0, (p.familiars | 0) - 1) * (has('swarm') ? 3 : 1.5) : 0,
+      familiars: Math.min(3, famCount(p)),
+      familiarDmg: f.familiars ? 3 + Math.max(0, famCount(p) - 1) * (has('swarm') ? 3 : 1.5) : 0,
       magnet: !!f.magnet,
       magnetR: has('feast') ? 170 : 125,
       charger: !!f.charger,
@@ -739,8 +748,9 @@
       familiars: 0, magnet: false, charger: false, thorns: 0, doubleTap: 0,
       greed: false, pushback: 0, potency: 1, prism: 0,
 
-      // ---- habilidad activa ----
-      abCharges: 0, abMax: 0, abCd: 0, abCdMax: 1,
+      // ---- habilidad activa (se recarga solo eliminando enemigos) ----
+      abCharges: 0, abMax: 0,
+      abKills: 0, abKillReq: 0,   // recarga por enemigos eliminados
 
       // ---- mejoras temporales (activas) ----
       buff: { dmg: 0, dmgT: 0, fire: 0, fireT: 0, spd: 0, spdT: 0, fam: 0, famT: 0 },
@@ -759,7 +769,7 @@
       revives: 0,
       compass: false,
       hasMap: false,
-      items: [],
+      items: [], // owned items (collected while alive)
 
       input: { mx: 0, my: 0, sx: 0, sy: 0, fire: false, use: false },
       // predicción en cliente
@@ -771,7 +781,9 @@
     if (opts.hp != null) p.hp = opts.hp;
     p.abMax = ch.active ? ch.active.charges : 0;
     p.abCharges = p.abMax;
-    p.abCdMax = ch.active ? ch.active.cd : 1;
+    // La activa solo se recarga eliminando enemigos (bajas), no con el tiempo.
+    p.abKillReq = ch.active ? (ch.active.kills || 8) : 0;
+    p.abKills = 0;
     if (opts.abCharges != null) p.abCharges = opts.abCharges;
     return p;
   }
@@ -1014,11 +1026,11 @@
     opts = opts || {};
     const a = Math.random() * Math.PI * 2;
     const sp = opts.pop === false ? 0 : 60 + Math.random() * 70;
-    const isChest = type === 'chest';
+    const isChest = type === 'chest' || type === 'goldenchest';
     return {
       kind: 'pickup',
       id: newId(),
-      type, // 'heart' | 'halfheart' | 'coin' | 'key' | 'trapdoor' | 'relic' | 'chest'
+      type, // 'heart' | 'halfheart' | 'coin' | 'key' | 'trapdoor' | 'relic' | 'chest' | 'goldenchest'
       x, y,
       r: type === 'trapdoor' ? 26 : (isChest ? 16 : 13),
       vx: Math.cos(a) * sp,

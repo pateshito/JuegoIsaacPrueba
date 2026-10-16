@@ -61,11 +61,27 @@
     localShootCd: 0,
     localPlayer: null,
     awaitingState: false,
+    // Desafío activo (id) y sus modificadores ya resueltos.
+    challenge: null,
+    modFlags: null,
   };
 
   let handlers = {};
 
   const simulating = () => G.mode === 'local' || G.mode === 'host';
+
+  // ---------------------------------------------------------
+  // Modificadores de desafío
+  // ---------------------------------------------------------
+  const modOn = (k) => !!(G.modFlags && G.modFlags[k]);
+  const itemSpawnsDisabled = () => !!(G.modFlags && G.modFlags.items === false);
+
+  // Crea un enemigo aplicando el multiplicador de velocidad del desafío.
+  function spawnEnemy(type, x, y) {
+    const e = E.createEnemy(type, x, y, G.floorNum);
+    if (modOn('enemySpeed') && e) e.speed *= (G.modFlags.enemySpeed || 1);
+    return e;
+  }
 
   // ---------------------------------------------------------
   // Utilidades internas
@@ -83,18 +99,19 @@
     return n;
   }
 
-  // Reanimaciones disponibles al empezar un piso:
-  // 1 base + una por Cordero pascual + una por Pluma de fénix.
+  // Reanimaciones disponibles al empezar un piso (solo online):
+  // 1 base + una por Vida extra + una por Pluma de fénix.
   function reviveBase() {
+    // Solo se conceden reanimaciones en modo online/cooperativo.
+    if (!isCoop()) return 0;
     return 1 + countItem('extra_life') + countItem('phoenix');
   }
 
-  // Refresca las reanimaciones por piso. En solitario NO se reponen: solo
-  // se concede la vida inicial (revivir una vez y morir).
+  // Refresca las reanimaciones por piso. Solo en online/cooperativo.
   function refreshRevives() {
     for (const p of G.players) {
       if (isCoop()) p.revives = Math.max(p.revives, reviveBase());
-      else if (p.revives < 0) p.revives = 0;
+      else p.revives = 0;
     }
   }
 
@@ -125,14 +142,26 @@
     return true;
   }
 
-  // Aplica un objeto a TODO el equipo (las mejoras son grupales).
+  // Aplica un objeto: si el jugador está muerto, no se le aplica.
+  // En modo normal (1 jugador) aplica a ese jugador.
+  // En cooperativo, los objetos son compartidos entre vivos? Según requisito:
+  // "los muertos se quedan sin ese objeto" - si están muertos y otro agarra, solo se le aplica a vivos.
   function giveItemToAll(itemId) {
     G.items.push(itemId);
-    for (const p of G.players) p.items = G.items;
-    for (const p of G.players) E.recomputeStats(p);
-    // Los objetos que dan reanimaciones las conceden al instante.
-    if (itemId === 'extra_life' || itemId === 'phoenix') {
-      for (const p of G.players) p.revives = Math.max(p.revives, reviveBase());
+    for (const p of G.players) {
+      if (!p.dead) {
+        if (p.items.indexOf(itemId) < 0) {
+          p.items.push(itemId);
+        }
+        E.recomputeStats(p);
+      }
+      // dead players do not receive the item
+    }
+    // conceder reanimaciones si aplica (solo online)
+    if ((itemId === 'extra_life' || itemId === 'phoenix') && isCoop()) {
+      for (const p of G.players) {
+        if (!p.dead) p.revives = Math.max(p.revives, reviveBase());
+      }
     }
   }
 
@@ -367,17 +396,8 @@
     }
 
     if (p.hp <= 0) {
-      // Vida extra: revive en el sitio con medio corazón.
-      if (p.revives > 0) {
-        p.revives--;
-        p.hp = Math.max(2, Math.floor(p.maxHp / 2));
-        p.invuln = 2.6;
-        G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#fff2c2', n: 28 });
-        addShake(0.5);
-        Sfx.play('pickup');
-        setMessage(p.name + ' ¡ha revivido!', 2.4);
-        return;
-      }
+      // No se reanima al morir. En online, los caídos vuelven al derrotar al
+      // jefe del piso (ver onBossDefeated); en solitario, morir acaba la partida.
       p.hp = 0;
       p.dead = true;
       p.reviveTimer = 0;
@@ -400,6 +420,8 @@
     if (i >= 0) G.enemies.splice(i, 1);
     G.stats.kills++;
     if (global.Meta) global.Meta.killEnemy();
+    // Recarga de la activa por enemigos eliminados (el logro es del equipo).
+    for (const pl of G.players) creditAbilityKill(pl, e.isBoss ? 99 : 1);
     Sfx.play('kill');
     addShake(e.isBoss ? 1.0 : 0.16);
     G.fxQueue.push({ k: 'boom', x: e.x, y: e.y, c: e.color, n: e.isBoss ? 40 : 12 });
@@ -408,7 +430,7 @@
     if (e.splits > 0) {
       for (let k = 0; k < e.splits; k++) {
         const a = (k / e.splits) * Math.PI * 2;
-        const child = E.createEnemy('fly', e.x + Math.cos(a) * 22, e.y + Math.sin(a) * 22, G.floorNum);
+        const child = spawnEnemy('fly', e.x + Math.cos(a) * 22, e.y + Math.sin(a) * 22);
         G.enemies.push(child);
       }
     }
@@ -430,7 +452,10 @@
       }
     }
 
-    if (e.isBoss) { if (global.Meta) global.Meta.bossKilled(e.type); onBossDefeated(); }
+    if (e.isBoss) {
+      if (global.Meta) global.Meta.bossKilled(e.type);
+      onBossDefeated();
+    }
   }
 
   function bestLuck() {
@@ -446,50 +471,67 @@
     G.room.pickups.push(E.createPickup(type, x, y, { lock: lock == null ? 0.9 : lock }));
   }
 
+  // Al abrir un cofre, los objetos NO van directos al inventario: aparecen en
+  // un pedestal sellado (lock) para que el jugador tenga que acercarse y
+  // tomarlos, igual que el botín del jefe.
+  function spawnItemPedestal(itemId, x, y, lock) {
+    if (!itemId) return;
+    if (!G.room.pedestals) G.room.pedestals = [];
+    G.room.pedestals.push(E.createPedestal(itemId, x, y, 0, lock == null ? 1 : lock));
+  }
+
   // ---------------------------------------------------------
-  // Recompensa al despejar una habitación (sustituye al botín de enemigos)
+  // Recompensa al despejar una habitación (sustituye al botín de enemigos).
+  // Nerfeada a propósito: la mayoría de salas NO sueltan nada. Solo ~60% deja
+  // UN recogible, casi siempre una moneda; corazones y llaves son raros.
   // ---------------------------------------------------------
   function roomClearReward(room) {
     const luck = bestLuck();
-    const n = room.enemyCount || 0;
-    // monedas según cuántos enemigos había (1..5)
-    const coins = Math.max(1, Math.min(5, Math.round(n * 0.4) + (G.floorNum >= 3 ? 1 : 0)));
-    for (let i = 0; i < coins; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const rr = 16 + Math.random() * 30;
-      dropPickup('coin', C.CX + Math.cos(a) * rr, C.CY + Math.sin(a) * rr);
-    }
-    // corazón si el equipo va malherido, o por azar (curaciones nerfeadas)
     const hurt = G.players.some((p) => !p.dead && p.hp <= p.maxHp * 0.4);
-    if (hurt || Math.random() < 0.28) {
-      dropPickup('heart', C.CX + (Math.random() - 0.5) * 44, C.CY + 26);
+
+    if (Math.random() < 0.60) {
+      const r = Math.random();
+      let type;
+      if (hurt) type = r < 0.5 ? 'heart' : (r < 0.94 ? 'coin' : 'key');
+      else type = r < 0.24 ? 'heart' : (r < 0.93 ? 'coin' : 'key');
+      // la suerte empuja un poco hacia objetos útiles (llaves), no hacia monedas
+      if (type === 'key' && Math.random() > 0.5 + luck * 0.05) type = 'coin';
+      const a = Math.random() * Math.PI * 2;
+      const rr = 16 + Math.random() * 34;
+      dropPickup(type, C.CX + Math.cos(a) * rr, C.CY + Math.sin(a) * rr);
     }
-    // llave ocasional
-    if (Math.random() < 0.12 + luck * 0.02) {
-      dropPickup('key', C.CX - 32, C.CY + 30);
-    }
-    // y a veces aparece un cofre
+
     maybeChest(room);
+    maybeGoldenChest(room);
   }
 
-  // Cofres: aparecen al finalizar una sala. Pueden ser gratis o costar
-  // llaves. Los gratis dan consumibles; los cerrados dan un objeto.
+  // Cofres normales: raros. Casi siempre dan consumibles; rara vez un objeto.
   function maybeChest(room) {
     if (room.type !== 'normal') return;
-    let chance = 0.22 + bestLuck() * 0.02;
-    if (Math.random() > chance) return;
-    const locked = Math.random() < (0.35 + Math.min(0.25, (G.floorNum - 1) * 0.03));
-    const keys = locked ? 1 : 0;
+    if (itemSpawnsDisabled()) return;
+    if (Math.random() > 0.07 + bestLuck() * 0.01) return;
     const x = C.CX + (Math.random() < 0.5 ? -78 : 78);
     const y = C.CY - 46;
     if (!room.pickups) room.pickups = [];
-    room.pickups.push(E.createPickup('chest', x, y, { keys, pop: false, lock: 0.9 }));
-    setMessage(locked ? '¡Un cofre cerrado! Abre con una llave 🔑' : '¡Apareció un cofre!', 1.9);
+    room.pickups.push(E.createPickup('chest', x, y, { keys: 0, pop: false, lock: 0.9 }));
+    setMessage('¡Apareció un cofre!', 1.9);
+  }
+
+  // Cofres dorados: muy raros. Cuestan una llave y dan botín excelente.
+  function maybeGoldenChest(room) {
+    if (room.type !== 'normal') return;
+    if (itemSpawnsDisabled()) return;
+    if (Math.random() > 0.015) return;
+    if (!room.pickups) room.pickups = [];
+    room.pickups.push(E.createPickup('goldenchest', C.CX, C.CY - 46, { keys: 1, pop: false, lock: 1.1 }));
+    bigMsg('✨ COFRE DORADO', 'Necesita una llave 🔑 para abrirse', 2.6);
+    Sfx.play('boss');
   }
 
   // Intenta abrir un cofre. Devuelve true si se abrió (y hay que quitarlo).
   function openChest(p, chest) {
     const cost = chest.keys || 0;
+    const golden = chest.type === 'goldenchest';
     if (cost > 0 && G.keys < cost) {
       if (!p._keyWarn || G.time - p._keyWarn > 1.5) {
         p._keyWarn = G.time;
@@ -503,24 +545,42 @@
     G.fxQueue.push({ k: 'boom', x: chest.x, y: chest.y, c: '#ffd166', n: 20 });
 
     const luck = bestLuck();
-    if (cost > 0) {
-      // cofre cerrado: garantiza un objeto para el equipo + monedas
-      giveItemToAll(pickPoolItem('treasure', ownedItems()));
-      const n = 2 + (Math.random() < 0.5 ? 1 : 0);
-      for (let i = 0; i < n; i++) {
-        dropPickup('coin', chest.x + (Math.random() - 0.5) * 64, chest.y + (Math.random() - 0.5) * 52);
+    if (golden) {
+      // cofre dorado: el mejor botín del juego (objeto garantizado y generoso).
+      // Los objetos aparecen en pedestales sellados, no directos al inventario.
+      if (!itemSpawnsDisabled()) {
+        const firstId = pickPoolItem('treasure', ownedItems());
+        spawnItemPedestal(firstId, chest.x, chest.y - 6, 1.1);
+        if (Math.random() < 0.5) {
+          const secondId = pickPoolItem('treasure', ownedItems().concat(firstId ? [firstId] : []));
+          if (secondId) {
+            const side = chest.x < C.CX ? 44 : -44;
+            spawnItemPedestal(secondId, chest.x + side, chest.y - 6, 1.1);
+          }
+        }
       }
-      if (Math.random() < 0.25) dropPickup('key', chest.x - 12, chest.y + 22);
-      setMessage('¡Cofre abierto! Objeto para el equipo', 2.0);
+      const n = 6 + Math.floor(Math.random() * 4);
+      for (let i = 0; i < n; i++) {
+        dropPickup('coin', chest.x + (Math.random() - 0.5) * 70, chest.y + (Math.random() - 0.5) * 56);
+      }
+      dropPickup('heart', chest.x + 18, chest.y);
+      if (Math.random() < 0.5) dropPickup('key', chest.x - 18, chest.y + 12);
+      setMessage('¡Cofre dorado! Objetos en los pedestales', 2.4);
     } else {
-      // cofre gratis: consumibles
-      const n = 3 + Math.floor(Math.random() * 3);
+      // cofre normal: consumibles y, MUY rara vez, un objeto (que aparece en un
+      // pedestal sellado, no directo al inventario).
+      const n = 2 + Math.floor(Math.random() * 3);
       for (let i = 0; i < n; i++) {
-        dropPickup('coin', chest.x + (Math.random() - 0.5) * 64, chest.y + (Math.random() - 0.5) * 52);
+        dropPickup('coin', chest.x + (Math.random() - 0.5) * 60, chest.y + (Math.random() - 0.5) * 48);
       }
-      if (Math.random() < 0.35) dropPickup('heart', chest.x + 16, chest.y);
-      if (Math.random() < 0.14 + luck * 0.02) dropPickup('key', chest.x - 16, chest.y + 10);
-      setMessage('¡Cofre abierto!', 1.6);
+      if (Math.random() < 0.3) dropPickup('heart', chest.x + 16, chest.y);
+      if (Math.random() < 0.12 + luck * 0.02) dropPickup('key', chest.x - 16, chest.y + 10);
+      if (!itemSpawnsDisabled() && Math.random() < 0.05) {
+        spawnItemPedestal(pickPoolItem('treasure', ownedItems()), chest.x, chest.y - 6, 1);
+        setMessage('¡Cofre abierto! ¡Apareció un objeto!', 2.2);
+      } else {
+        setMessage('¡Cofre abierto!', 1.6);
+      }
     }
     return true;
   }
@@ -567,7 +627,7 @@
         } else {
           pos = findSpawnPos(rng, true, entrySide);
         }
-        G.enemies.push(E.createEnemy(entry.type, pos.x, pos.y, G.floorNum));
+        G.enemies.push(spawnEnemy(entry.type, pos.x, pos.y));
       }
     }
     room.enemyCount = total;
@@ -586,13 +646,17 @@
     if (!room.spawned) {
       room.spawned = true;
       if (room.type === 'treasure') {
-        room.pedestals.push(E.createPedestal(pickPoolItem('treasure', ownedItems()), C.CX, C.CY, 0, 0.9));
-        // las salas del tesoro traen además un cofre gratis
-        room.pickups.push(E.createPickup('chest', C.CX + 120, C.CY, { keys: 0, pop: false, lock: 0.9 }));
+        if (!itemSpawnsDisabled()) {
+          room.pedestals.push(E.createPedestal(pickPoolItem('treasure', ownedItems()), C.CX, C.CY, 0, 0.9));
+          // las salas del tesoro traen además un cofre gratis
+          room.pickups.push(E.createPickup('chest', C.CX + 120, C.CY, { keys: 0, pop: false, lock: 0.9 }));
+        }
       } else if (room.type === 'shop') {
-        const firstId = pickPoolItem('shop', ownedItems());
-        room.pedestals.push(E.createPedestal(firstId, C.CX - 120, C.CY, 12));
-        room.pedestals.push(E.createPedestal(pickPoolItem('shop', ownedItems().concat([firstId])), C.CX, C.CY, 15));
+        if (!itemSpawnsDisabled()) {
+          const firstId = pickPoolItem('shop', ownedItems());
+          room.pedestals.push(E.createPedestal(firstId, C.CX - 120, C.CY, 12));
+          room.pedestals.push(E.createPedestal(pickPoolItem('shop', ownedItems().concat([firstId])), C.CX, C.CY, 15));
+        }
         // consumibles con precio (las llaves ahora sirven para abrir puertas)
         room.pickups.push(E.createPickup('key', C.CX + 120, C.CY - 26, { price: 5, pop: false }));
         room.pickups.push(E.createPickup('heart', C.CX + 120, C.CY + 26, { price: 3, pop: false }));
@@ -687,7 +751,9 @@
     // recompensa del jefe: objeto (pool de jefe) + una llave + trampilla
     if (room.type === 'boss') {
       // Todo aparece "sellado" 2 s: primero sale un contador y luego se puede coger.
-      room.pedestals.push(E.createPedestal(pickPoolItem('boss', ownedItems()), C.CX - 90, C.CY, 0, 2));
+      if (!itemSpawnsDisabled()) {
+        room.pedestals.push(E.createPedestal(pickPoolItem('boss', ownedItems()), C.CX - 90, C.CY, 0, 2));
+      }
       room.pickups.push(E.createPickup('key', C.CX - 90, C.CY + 70, { pop: false, lock: 2 }));
       const last = G.floorNum >= C.FLOORS;
       room.pickups.push(E.createPickup('trapdoor', C.CX + 80, C.CY, { pop: false, lock: 2 }));
@@ -699,10 +765,8 @@
     // Limpiar una sala NO resucita a los caídos: en cooperativo cada
     // jugador puede revivir una vez por piso (o muere, en solitario).
 
-    // Habilidad activa: limpiar una sala reduce 15 s de recarga.
-    for (const p of G.players) {
-      if (p.abCd > 0) p.abCd = Math.max(0, p.abCd - 15);
-    }
+    // La habilidad activa solo se recarga eliminando enemigos: limpiar una
+    // sala no reduce ninguna recarga.
 
     // Ángel (pasiva, nerfeada): 50% de curar medio corazón al equipo.
     if (G.players.some((p) => p.allyHeal) && Math.random() < 0.5) {
@@ -713,7 +777,7 @@
       }
     }
 
-    // Magdalena (pasiva): al limpiar, 15% de curarse 1 corazón.
+    // Tanque Santa (pasiva): al limpiar, 15% de curarse 1 corazón.
     for (const p of G.players) {
       if (p.dead || p.hp >= p.maxHp || !(p.roomHeal > 0)) continue;
       if (Math.random() < p.roomHeal) {
@@ -729,42 +793,63 @@
   }
 
   // ---------------------------------------------------------
-  // Eventos raros: en contadas ocasiones aparece un cofre dorado con
-  // monedas de progreso y opciones de compra desbloqueadas.
+  // Eventos raros: en contadas ocasiones aparece un destello dorado
+  // que regala un objeto al equipo.
   // ---------------------------------------------------------
   function maybeRandomEvent() {
-    if (Math.random() > 0.035) return;   // ~3.5% por sala
+    if (Math.random() > 0.02) return;   // ~2% por sala
     const room = G.room;
     if (!room || room.type === 'start') return;
     if (!room.pickups) room.pickups = [];
     if (room.pickups.some((k) => k.type === 'relic')) return;
     room.pickups.push(E.createPickup('relic', C.CX, C.CY, { pop: true }));
     G.eventFlash = 1;
-    bigMsg('✨ SUCESO EXTRAÑO', 'Un cofre de progreso apareció', 2.6);
+    bigMsg('✨ SUCESO EXTRAÑO', 'Algo brilla en la sala', 2.6);
     Sfx.play('boss');
   }
 
+  // Suceso raro: marca el logro y regala un objeto (salvo en «Manos vacías»).
   function applyRelic(p) {
-    const bonus = 90 + G.floorNum * 12 + G.stats.kills;
-    if (global.Meta) {
-      global.Meta.addCoins(bonus);
-      global.Meta.recordEvent();
-      // Desbloquea la compra de un personaje oculto (si queda alguno).
-      const hidden = (global.Characters ? Characters.LIST : []).filter((c) => c.hidden && !global.Meta.isShopUnlocked(c.id));
-      if (hidden.length) {
-        const pick = hidden[Math.floor(Math.random() * hidden.length)];
-        global.Meta.unlockShop(pick.id);
-        setMessage('¡Se ha desbloqueado la compra de ' + pick.name + '!', 3.2);
-      } else {
-        setMessage('+' + bonus + ' monedas de progreso', 2.6);
-      }
+    if (global.Meta) global.Meta.recordEvent();
+    if (!itemSpawnsDisabled()) {
+      giveItemToAll(pickPoolItem('treasure', ownedItems()));
+      setMessage('¡Suceso extraño! Objeto para el equipo', 3);
+    } else {
+      setMessage('¡Suceso extraño!', 2.6);
     }
     G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#ffd166', n: 30 });
     addShake(0.3);
   }
 
   function onBossDefeated() {
-    // se gestiona en checkRoomCleared
+    // Al derrotar un jefe: revive a todos los caídos SOLO en modo online (cooperativo)
+    if (G.players.length > 1) {
+      const cx = C.CX;
+      const cy = C.CY;
+      let revived = false;
+      for (const p of G.players) {
+        // Cada caído vuelve con una reanimación disponible (mínimo una base
+        // por piso en online) y a media vida máxima.
+        if (p.dead && p.revives > 0) {
+          p.revives--;
+          p.dead = false;
+          p.hp = Math.max(2, Math.floor(p.maxHp / 2));
+          p.invuln = 3.0;
+          p.reviveTimer = 0;
+          p.x = cx;
+          p.y = cy;
+          if (G.room) {
+            clampPlayerToRoom(p);
+          }
+          G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#fff2c2', n: 28 });
+          revived = true;
+        }
+      }
+      if (revived) {
+        setMessage('¡Los caídos han revivido con la mitad de su vida!', 3.2);
+        Sfx.play('pickup');
+      }
+    }
   }
 
   function nextFloor() {
@@ -849,116 +934,142 @@
     }, o)));
   }
 
+  // Contexto de las habilidades activas. La partida real usa `gameActiveCtx`
+  // (opera sobre `G`); la zona de pruebas inyecta su propio contexto para que
+  // las activas funcionen igual sin tocar la partida de verdad.
+  const gameActiveCtx = {
+    get time() { return G.time; },
+    get players() { return G.players; },
+    get pedestals() { return (G.room && G.room.pedestals) || []; },
+    spawnBullet: spawnActiveBullet,
+    explode: explodeAt,
+    fx(x, y, c, n) { G.fxQueue.push({ k: 'boom', x, y, c, n }); },
+    message: setMessage,
+    shake: addShake,
+    reveal() { G.revealed = true; },
+    rerollItem() { return pickPoolItem('treasure', ownedItems()); },
+    spawnCoin(x, y) {
+      if (!G.room) return;
+      if (!G.room.pickups) G.room.pickups = [];
+      G.room.pickups.push(E.createPickup('coin', x, y));
+    },
+  };
+
   const ACTIVES = {
     // Ráfaga circular de lágrimas.
-    tears(p) {
+    tears(p, ctx) {
       const n = 12;
       for (let i = 0; i < n; i++) {
-        const a = (i / n) * Math.PI * 2 + G.time;
-        spawnActiveBullet(p, p.x + Math.cos(a) * 16, p.y + Math.sin(a) * 16,
+        const a = (i / n) * Math.PI * 2 + ctx.time;
+        ctx.spawnBullet(p, p.x + Math.cos(a) * 16, p.y + Math.sin(a) * 16,
           Math.cos(a) * p.bulletSpeed, Math.sin(a) * p.bulletSpeed,
           { dmg: p.damage * 1.1, r: p.bulletSize, color: '#dff1ff', life: p.range });
       }
     },
     // Curación + inmunidad (nerfeada: 1 corazón).
-    heal(p) {
+    heal(p, ctx) {
       p.hp = Math.min(p.maxHp, p.hp + 2);
       p.invuln = Math.max(p.invuln, 1.6);
-      G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#ff8fb0', n: 24 });
+      ctx.fx(p.x, p.y, '#ff8fb0', 24);
     },
     // Revela todo el mapa del piso.
-    reveal(p) { G.revealed = true; setMessage('Mapa del piso revelado', 2.2); },
+    reveal(p, ctx) { ctx.reveal(); ctx.message('Mapa del piso revelado', 2.2); },
     // Daga perforante devastadora.
-    dagger(p) {
+    dagger(p, ctx) {
       const a = Math.atan2(p.aim.y, p.aim.x);
-      spawnActiveBullet(p, p.x + Math.cos(a) * 18, p.y + Math.sin(a) * 18,
+      ctx.spawnBullet(p, p.x + Math.cos(a) * 18, p.y + Math.sin(a) * 18,
         Math.cos(a) * p.bulletSpeed * 1.2, Math.sin(a) * p.bulletSpeed * 1.2,
         { dmg: p.damage * 3.2, r: 11, color: '#ffd9e0', life: 1.8, pierce: true, explode: 20 });
     },
     // Explosión de daño en la dirección apuntada.
-    blast(p) {
+    blast(p, ctx) {
       const a = Math.atan2(p.aim.y, p.aim.x);
       const x = p.x + Math.cos(a) * 70, y = p.y + Math.sin(a) * 70;
-      explodeAt(x, y, 72, 6 + p.damage, { c: '#ff9a3c', self: false });
-      addShake(0.3);
+      ctx.explode(x, y, 72, 6 + p.damage, { c: '#ff9a3c', self: false });
+      ctx.shake(0.3);
     },
     // Cambia el objeto del pedestal más cercano.
-    reroll(p) {
-      const room = G.room;
-      if (!room || !room.pedestals) return;
+    reroll(p, ctx) {
       let best = null, bd = 1e9;
-      for (const d of room.pedestals) {
+      for (const d of (ctx.pedestals || [])) {
         if (d.taken) continue;
         const dd = Utils.dist2(p.x, p.y, d.x, d.y);
         if (dd < bd) { bd = dd; best = d; }
       }
-      if (!best) { setMessage('No hay ningún pedestal cerca', 1.6); return; }
-      best.itemId = pickPoolItem('treasure', ownedItems());
-      G.fxQueue.push({ k: 'boom', x: best.x, y: best.y, c: '#a6f28a', n: 20 });
-      setMessage('¡Objeto reciclado!', 2);
+      if (!best) { ctx.message('No hay ningún pedestal cerca', 1.6); return; }
+      best.itemId = ctx.rerollItem();
+      ctx.fx(best.x, best.y, '#a6f28a', 20);
+      ctx.message('¡Objeto reciclado!', 2);
     },
     // Intangible: inmune y algo más rápido.
-    phase(p) {
+    phase(p, ctx) {
       p.invuln = Math.max(p.invuln, 3);
       const b = p.buff || (p.buff = { dmg: 0, dmgT: 0, fire: 0, fireT: 0, spd: 0, spdT: 0, fam: 0, famT: 0 });
       b.spd = Math.max(b.spd, 70); b.spdT = Math.max(b.spdT, 3);
-      G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#dff1ff', n: 22 });
+      ctx.fx(p.x, p.y, '#dff1ff', 22);
     },
     // Doble cadencia temporal.
-    overclock(p) {
+    overclock(p, ctx) {
       const b = p.buff || (p.buff = { dmg: 0, dmgT: 0, fire: 0, fireT: 0, spd: 0, spdT: 0, fam: 0, famT: 0 });
       b.fire = Math.max(b.fire, p.fireRate + 0.6); b.fireT = Math.max(b.fireT, 4);
-      G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#ffd166', n: 20 });
+      ctx.fx(p.x, p.y, '#ffd166', 20);
     },
     // Sacrifica 1 punto de vida por daño temporal.
-    pact(p) {
+    pact(p, ctx) {
       p.hp = Math.max(1, p.hp - 1);
       const b = p.buff || (p.buff = { dmg: 0, dmgT: 0, fire: 0, fireT: 0, spd: 0, spdT: 0, fam: 0, famT: 0 });
       b.dmg = Math.max(b.dmg, 2.6); b.dmgT = Math.max(b.dmgT, 8);
-      G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#ff6b8a', n: 22 });
+      ctx.fx(p.x, p.y, '#ff6b8a', 22);
     },
     // Escudo para todo el equipo.
-    bless(p) {
-      for (const q of G.players) { if (!q.dead) q.shield = Math.max(q.shield, 1); }
-      G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#bfe3ff', n: 24 });
-      setMessage('¡Bendición para el equipo!', 2);
+    bless(p, ctx) {
+      for (const q of ctx.players) { if (!q.dead) q.shield = Math.max(q.shield, 1); }
+      ctx.fx(p.x, p.y, '#bfe3ff', 24);
+      ctx.message('¡Bendición para el equipo!', 2);
     },
     // Furia: daño y velocidad temporales.
-    fury(p) {
+    fury(p, ctx) {
       const b = p.buff || (p.buff = { dmg: 0, dmgT: 0, fire: 0, fireT: 0, spd: 0, spdT: 0, fam: 0, famT: 0 });
       b.dmg = Math.max(b.dmg, 1.8); b.dmgT = Math.max(b.dmgT, 6);
       b.spd = Math.max(b.spd, 50); b.spdT = Math.max(b.spdT, 6);
-      G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#ff9a3c', n: 22 });
+      ctx.fx(p.x, p.y, '#ff9a3c', 22);
     },
     // Moscas familiares temporales.
-    summon(p) {
+    summon(p, ctx) {
       const b = p.buff || (p.buff = { dmg: 0, dmgT: 0, fire: 0, fireT: 0, spd: 0, spdT: 0, fam: 0, famT: 0 });
       b.fam = Math.max(b.fam, 2); b.famT = Math.max(b.famT, 10);
-      G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#b58cff', n: 22 });
+      ctx.fx(p.x, p.y, '#b58cff', 22);
     },
     // Siembra monedas y cura.
-    wealth(p) {
-      if (!G.room) return;
-      if (!G.room.pickups) G.room.pickups = [];
+    wealth(p, ctx) {
       for (let i = 0; i < 5; i++) {
         const a = Math.random() * Math.PI * 2, r = 30 + Math.random() * 50;
-        G.room.pickups.push(E.createPickup('coin', p.x + Math.cos(a) * r, p.y + Math.sin(a) * r));
+        ctx.spawnCoin(p.x + Math.cos(a) * r, p.y + Math.sin(a) * r);
       }
-      G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#ffd166', n: 20 });
+      ctx.fx(p.x, p.y, '#ffd166', 20);
     },
   };
 
-  function updateAbility(p, dt) {
-    if (!p.abMax) return;
-    if (p.abCharges >= p.abMax) { p.abCd = p.abCdMax; return; }
-    p.abCd = num(p.abCd, 0) - dt;
+  // Suma bajas a la activa del jugador. Al alcanzar el requisito, recupera una
+  // carga (las activas nunca acumulan más de una). El progreso se comparte en
+  // equipo: cualquier baja cuenta para todos los jugadores vivos. Es la ÚNICA
+  // forma de recargar una activa (nada de tiempo ni de limpiar salas).
+  function creditAbilityKill(p, amount) {
+    if (!p || p.dead || !p.abMax || p.abKillReq <= 0) return;
+    if (p.abCharges >= p.abMax) { p.abKills = 0; return; }
+    p.abKills = num(p.abKills, 0) + amount;
     let guard = 0;
-    while (p.abCd <= 0 && p.abCharges < p.abMax && guard++ < 8) {
+    while (p.abKills >= p.abKillReq && p.abCharges < p.abMax && guard++ < 16) {
+      p.abKills -= p.abKillReq;
       p.abCharges++;
-      if (p.abCharges >= p.abMax) { p.abCd = p.abCdMax; break; }
-      p.abCd += p.abCdMax;
     }
-    if (p.abCd < 0) p.abCd = 0;
+    if (p.abCharges >= p.abMax) p.abKills = 0;
+  }
+
+  function updateAbility(p, dt) {
+    // Las activas NO se recargan con el tiempo: solo eliminando enemigos
+    // (ver creditAbilityKill). Esta función se conserva por compatibilidad.
+    if (!p.abMax) return;
   }
 
   function updateBuffs(p, dt) {
@@ -970,26 +1081,27 @@
     if (b.famT > 0) { b.famT -= dt; if (b.famT <= 0) { b.fam = 0; b.famT = 0; } }
   }
 
-  function tryUseAbility(p) {
+  function tryUseAbility(p, ctx) {
+    ctx = ctx || gameActiveCtx;
     if (p.dead || !p.abMax) return false;
     if (p.abCharges <= 0) {
-      if (!p._abWarn || G.time - p._abWarn > 1.2) {
-        p._abWarn = G.time;
-        setMessage('Habilidad recargándose (' + Math.ceil(p.abCd) + ' s)', 1.4);
+      if (!p._abWarn || ctx.time - p._abWarn > 1.2) {
+        p._abWarn = ctx.time;
+        const falta = p.abKillReq ? Math.max(0, p.abKillReq - num(p.abKills, 0)) : 0;
+        ctx.message('Habilidad recargándose (' + falta + ' bajas)', 1.4);
       }
       return false;
     }
     const ch = E.charOf({ char: p.charId });
     const act = ch && ch.active;
     if (!act) return false;
-    const wasFull = p.abCharges >= p.abMax;
     p.abCharges--;
-    if (wasFull) p.abCd = p.abCdMax;
+    p.abKills = 0;
     const fn = ACTIVES[act.id];
-    if (fn) { try { fn(p); } catch (e) { /* activa sin efecto */ } }
+    if (fn) { try { fn(p, ctx); } catch (e) { /* activa sin efecto */ } }
     Sfx.play('pickup');
-    G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: '#e8f0ff', n: 16 });
-    setMessage(p.name + ': ' + act.name, 1.6);
+    ctx.fx(p.x, p.y, '#e8f0ff', 16);
+    ctx.message(p.name + ': ' + act.name, 1.6);
     return true;
   }
 
@@ -999,6 +1111,12 @@
     if (p.invuln > 0) p.invuln -= dt;
     if (p.hurtFlash > 0) p.hurtFlash -= dt;
     if (p.dead) return;
+
+    // Desafío «Corazón de cristal»: un único contenedor de vida.
+    if (modOn('oneHeart')) {
+      if (p.maxHp > 2) p.maxHp = 2;
+      if (p.hp > p.maxHp) p.hp = p.maxHp;
+    }
 
     // Robot (pasiva): recupera un escudo con el tiempo si no tiene ninguno.
     if (p.shieldRegen && p.shield < 1) {
@@ -1024,7 +1142,8 @@
     movePlayer(p, inp, dt);
 
     // Habilidad activa (tecla propia de cada esquema).
-    if (inp.use) tryUseAbility(p);
+    // Desafío «Manos atadas»: la activa queda deshabilitada.
+    if (inp.use && !modOn('noActive')) tryUseAbility(p);
 
     p.shootCd -= dt;
     p.chargeT = (p.chargeT || 0) + dt;   // tiempo sin disparar (Golpe cargado)
@@ -1069,7 +1188,7 @@
           nextFloor();
           return;
         }
-        if (k.type === 'chest') {
+        if (k.type === 'chest' || k.type === 'goldenchest') {
           if (openChest(p, k)) room.pickups.splice(i, 1);
           continue;
         }
@@ -1156,12 +1275,25 @@
 
   function giveItem(p, itemId) {
     const item = E.itemById(itemId);
-    // Las mejoras son COMPARTIDAS: se aplican a todo el equipo.
-    giveItemToAll(itemId);
+    // Las mejoras se aplican a jugadores vivos (no a los muertos)
+    G.items.push(itemId);
+    for (const q of G.players) {
+      if (!q.dead) {
+        if (q.items.indexOf(itemId) < 0) {
+          q.items.push(itemId);
+        }
+        E.recomputeStats(q);
+      }
+    }
+    if ((itemId === 'extra_life' || itemId === 'phoenix') && isCoop()) {
+      for (const q of G.players) {
+        if (!q.dead) q.revives = Math.max(q.revives, reviveBase());
+      }
+    }
     if (global.Meta) global.Meta.recordItems(G.items.length);
     Sfx.play('pickup');
     addShake(0.18);
-    setMessage('¡' + item.name + '! para todo el equipo · ' + item.desc, 3.2);
+    setMessage('¡' + item.name + '! para jugadores vivos · ' + item.desc, 3.2);
     G.fxQueue.push({ k: 'boom', x: p.x, y: p.y, c: item.color, n: 18 });
   }
 
@@ -1587,7 +1719,7 @@
         const allowed = pools ? pools[(G.floorNum - 1) % pools.length] : ['fly'];
         for (let i = 0; i < n; i++) {
           const a = Math.random() * Math.PI * 2;
-          G.enemies.push(E.createEnemy(Utils.pick(Math.random, allowed), e.x + Math.cos(a) * 48, e.y + Math.sin(a) * 48, G.floorNum));
+          G.enemies.push(spawnEnemy(Utils.pick(Math.random, allowed), e.x + Math.cos(a) * 48, e.y + Math.sin(a) * 48));
         }
         setMessage('¡La colmena llama a sus crías!', 1.6);
         Sfx.play('door');
@@ -1775,7 +1907,7 @@
     const room = G.room;
     if (!room || !room.pickups) return;
     for (const k of room.pickups) {
-      if (k.type === 'trapdoor' || k.type === 'chest') continue;
+      if (k.type === 'trapdoor' || k.type === 'chest' || k.type === 'goldenchest') continue;
       const d = Math.hypot(k.x - p.x, k.y - p.y);
       if (d > 6 && d < pr.magnetR) {
         const s = 170 * dt;
@@ -2113,7 +2245,8 @@
       p.slot, p.coins, p.items.join(','), p.ping || 0,
       num(p.skin, 0), (p.compass ? 1 : 0) | (p.hasMap ? 2 : 0),
       num(p.shield, 0), num(p.revives, 0), num(p.keys, 0),
-      charIdx, num(p.abCharges, 0), num(p.abMax, 0), n1(p.abCd),
+      charIdx, num(p.abCharges, 0), num(p.abMax, 0),
+      num(p.abKills, 0), num(p.abKillReq, 0),
     ];
   }
 
@@ -2197,7 +2330,8 @@
         compass: !!(a[19] & 1), hasMap: !!(a[19] & 2),
         shield: num(a[20]), revives: num(a[21]), keys: num(a[22]),
         charId: (global.Characters && a[23] != null) ? Characters.LIST[Characters.normIndex(a[23])].id : 'isaac',
-        abCharges: num(a[24], 0), abMax: num(a[25], 0), abCd: num(a[26], 0),
+        abCharges: num(a[24], 0), abMax: num(a[25], 0),
+        abKills: num(a[26], 0), abKillReq: num(a[27], 0),
         r: 6,
       })),
       enemies: (s.e || []).map((a) => ({
@@ -2216,7 +2350,7 @@
       })),
       pickups: (s.k || []).map((a) => ({
         kind: 'pickup', id: a[0], type: a[1], x: num(a[2]), y: num(a[3]),
-        r: a[1] === 'trapdoor' ? 26 : (a[1] === 'chest' ? 16 : 13),
+        r: a[1] === 'trapdoor' ? 26 : ((a[1] === 'chest' || a[1] === 'goldenchest') ? 16 : 13),
         price: a[4], keys: a[5] || 0, bob: 0,
       })),
       pedestals: (s.d || []).map((a) => ({
@@ -2463,7 +2597,8 @@
             coinsHeal: G.localPlayer.coinsHeal, flying: G.localPlayer.flying,
             // personaje y habilidad activa
             charId: G.localPlayer.charId,
-            abCharges: G.localPlayer.abCharges, abMax: G.localPlayer.abMax, abCd: G.localPlayer.abCd,
+            abCharges: G.localPlayer.abCharges, abMax: G.localPlayer.abMax,
+            abKills: G.localPlayer.abKills, abKillReq: G.localPlayer.abKillReq,
             items: G.localPlayer.items,
           });
         }
@@ -2498,6 +2633,7 @@
       message: G.message, messageTimer: G.messageTimer,
       bigMessage: G.bigMessage, hintTimer: G.hintTimer,
       shake: G.shake, transition: G.transition,
+      challenge: G.challenge || null,
     };
     if (G.mode === 'client') {
       return Object.assign(clientView(), base, { room: G.room, time: G.renderClock });
@@ -2521,6 +2657,9 @@
     G.mode = opts.mode || 'local';
     G.seed = (opts.seed != null ? opts.seed : Utils.makeSeed()) >>> 0;
     G.floorNum = opts.floorNum || 1;
+    // Desafío (opcional): id + modificadores resueltos.
+    G.challenge = opts.challenge || null;
+    G.modFlags = (G.challenge && global.Challenges) ? ((global.Challenges.byId(G.challenge) || {}).mods || null) : null;
     G.time = 0;
     G.renderClock = 0;
     G.over = false;
@@ -2579,10 +2718,12 @@
       for (const rp of opts.remotePlayers) addRemotePlayer(rp.id, rp.name, rp.skin, rp.char);
     }
 
-    // Todas las mejoras son del equipo: cada jugador apunta a la lista común.
-    for (const p of G.players) { p.items = G.items; p.coins = 0; p.keys = 0; }
+    // Mejoras de equipo: `G.items` es el registro común (lo que ha recogido el
+    // grupo), pero cada jugador guarda su PROPIA lista para que los caídos no
+    // reciban lo que se recoja mientras están muertos.
+    for (const p of G.players) { p.items = []; p.coins = 0; p.keys = 0; }
     syncPool();
-    // Reanimaciones iniciales (en solitario: una para toda la partida).
+    // Reanimaciones iniciales (0 en solitario; en online, una por piso).
     for (const p of G.players) p.revives = reviveBase();
     if (global.Meta) {
       global.Meta.reachFloor(G.floorNum);
@@ -2612,7 +2753,10 @@
       local: false,
     });
     p.remote = true;
-    p.items = G.items;
+    // Quien entra con la partida en marcha hereda las mejoras que ya tiene el
+    // grupo (sigue vivo), en su propia lista.
+    p.items = G.items.slice();
+    E.recomputeStats(p);
     p.x = C.CX + (Math.random() - 0.5) * 60;
     p.y = C.CY + 30 + (Math.random() - 0.5) * 30;
     if (G.room) { clampPlayerToRoom(p); resolveObstacles(p); }
@@ -2689,6 +2833,7 @@
       kills: G.stats.kills,
       win: !!G.victory,
       items: G.items.length,
+      challenge: G.challenge || null,
     };
   }
 
@@ -2696,7 +2841,8 @@
     G, start, step, stop, view, setPaused,
     addRemotePlayer, removePlayer, setRemoteInput,
     applyState, applyPing, serialState,
-    tryUseAbility, reviveBase, giveItemToAll, runSummary,
+    tryUseAbility, reviveBase, giveItemToAll, runSummary, onBossDefeated,
+    updateAbility, updateBuffs,
     addCoins, spendCoins, addKeys, spendKey, syncPool, countItem,
     setHandlers(h) { handlers = h || {}; },
     get simulating() { return simulating(); },

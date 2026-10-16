@@ -34,20 +34,26 @@
     joinName: $('#join-name'),
     charPicker: $('#char-picker'),
     charPickerJoin: $('#char-picker-join'),
-    menuCoins: $('#menu-coins'),
+    charDetail: $('#char-detail'),
+    charDetailJoin: $('#char-detail-join'),
     menuAch: $('#menu-ach'),
     menuAchTotal: $('#menu-ach-total'),
     ovShop: $('#ov-shop'),
+    ovChallenges: $('#ov-challenges'),
     ovProgress: $('#ov-progress'),
     ovUpgrades: $('#ov-upgrades'),
     shopGrid: $('#shop-grid'),
-    shopCoins: $('#shop-coins'),
+    rosterDetail: $('#roster-detail'),
+    challList: $('#chall-list'),
+    ovPreview: $('#ov-preview'),
+    previewChars: $('#preview-chars'),
+    previewInfo: $('#preview-info'),
     progStats: $('#prog-stats'),
     achList: $('#ach-list'),
     progAchCount: $('#prog-ach-count'),
     upgList: $('#upg-list'),
     achToasts: $('#ach-toasts'),
-    endCoins: $('#end-coins'),
+    endUnlocked: $('#end-unlocked'),
     toast: $('#toast'),
   };
 
@@ -63,6 +69,7 @@
   let hostSeed = 0, hostFloor = 1;
   let toastTimer = 0;
   let idleT = 0;
+  let previewInfoAcc = 0;
   let endHandled = false;
   let runRewarded = false;
 
@@ -80,7 +87,7 @@
   }
 
   function showOverlay(which) {
-    [ui.ovMain, ui.ovHelp, ui.ovLobby, ui.ovJoin, ui.ovPause, ui.ovEnd, ui.ovShop, ui.ovProgress].forEach(hide);
+    [ui.ovMain, ui.ovHelp, ui.ovLobby, ui.ovJoin, ui.ovPause, ui.ovEnd, ui.ovShop, ui.ovChallenges, ui.ovProgress, ui.ovPreview].forEach(hide);
     if (which) show(which);
   }
 
@@ -157,10 +164,16 @@
     try { localStorage.setItem('llanto-char', id); } catch (e) {}
   }
 
+  // Icono de personaje: la misma cara redonda que se dibuja en el juego.
   function faceSpan(char) {
-    const f = document.createElement('span');
+    const f = document.createElement('canvas');
     f.className = 'face';
-    f.style.background = Entities.skinColor(char.skin);
+    const S = 64;
+    f.width = S; f.height = S;
+    const g = f.getContext ? f.getContext('2d') : null;
+    if (g && global.Render && Render.drawFace) {
+      try { Render.drawFace(g, char.skin, S / 2, S * 0.58, S * 0.30); } catch (e) { /* icono sin cara */ }
+    }
     return f;
   }
 
@@ -169,12 +182,28 @@
     const c = ch.byId(id);
     if (!c) return;
     const mt = MT();
-    if (mt && !mt.isUnlocked(id)) return;
+    if (mt && !mt.isUnlocked(id)) { toast('Ese personaje aún está bloqueado'); return; }
     playerChar = id;
     playerSkin = Entities.normSkin(c.skin);
     saveChar(id);
     Sfx.play('ui');
     renderCharPickers();
+  }
+
+  // Ficha de personaje: nombre, descripción, pasiva, activa y desbloqueo.
+  function charInfoHtml(c) {
+    const mt = MT();
+    const st = mt ? mt.charStatus(c) : { state: 'owned' };
+    const owned = st.state === 'owned';
+    let h = '';
+    h += '<div class="cd-name">' + Utils.escapeHtml(c.name) + (owned ? '' : ' 🔒') + '</div>';
+    h += '<div class="cd-desc">' + Utils.escapeHtml(c.desc || '') + '</div>';
+    h += '<div class="cd-line"><b>Pasiva · ' + Utils.escapeHtml(c.passive.name) + '</b><span>' + Utils.escapeHtml(c.passive.desc) + '</span></div>';
+    h += '<div class="cd-line"><b>Activa · ' + Utils.escapeHtml(c.active.name) + '</b><span>' +
+         Utils.escapeHtml(c.active.desc) + ' (1 carga · recarga solo con ' + (c.active.kills || 8) + ' bajas)</span></div>';
+    if (owned) h += '<div class="cd-unlock owned">✓ Desbloqueado</div>';
+    else h += '<div class="cd-unlock">🔒 Desbloqueo: ' + Utils.escapeHtml(st.reason || '???') + '</div>';
+    return h;
   }
 
   function renderCharPickers() {
@@ -186,11 +215,10 @@
       box.innerHTML = '';
       ch.LIST.forEach((c) => {
         const owned = !mt || mt.isUnlocked(c.id);
-        if (c.hidden && !owned) return;
         const b = document.createElement('button');
         b.type = 'button';
         b.className = 'char-btn' + (c.id === playerChar ? ' selected' : '') + (owned ? '' : ' locked');
-        b.title = c.name + (owned ? '' : ' — desbloquéalo en la tienda');
+        b.title = c.name + (owned ? '' : ' — ' + (mt ? mt.charStatus(c).reason : 'Bloqueado'));
         b.setAttribute('data-char', c.id);
         b.setAttribute('aria-label', c.name);
         b.appendChild(faceSpan(c));
@@ -207,89 +235,161 @@
         box.appendChild(b);
       });
     });
+    const c = ch.byId(playerChar);
+    if (ui.charDetail) ui.charDetail.innerHTML = charInfoHtml(c);
+    if (ui.charDetailJoin) ui.charDetailJoin.innerHTML = charInfoHtml(c);
   }
 
   function renderMetaBar() {
     const mt = MT(); if (!mt) return;
-    if (ui.menuCoins) ui.menuCoins.textContent = String(mt.coins);
     if (ui.menuAch) ui.menuAch.textContent = String(mt.achievementCount());
     if (ui.menuAchTotal) ui.menuAchTotal.textContent = String(mt.ACHIEVEMENTS.length);
   }
 
+  // ---------------------------------------------------------
+  // Personajes: galería + detalle (antes "tienda", ahora sin monedas)
+  // ---------------------------------------------------------
+  let rosterSel = null;
+
+  function renderRosterDetail(id) {
+    const ch = CH();
+    if (!ch || !ui.rosterDetail) return;
+    const c = ch.byId(id);
+    const mt = MT();
+    const owned = !mt || mt.isUnlocked(c.id);
+    ui.rosterDetail.innerHTML = charInfoHtml(c) + '<div class="cd-actions"></div>';
+    const actions = ui.rosterDetail.querySelector('.cd-actions');
+    if (!actions) return;
+    if (owned) {
+      const b = document.createElement('button');
+      b.className = 'btn small' + (c.id === playerChar ? '' : ' primary');
+      b.setAttribute('data-char', c.id);
+      b.textContent = c.id === playerChar ? '✓ Elegido' : 'Elegir';
+      actions.appendChild(b);
+    }
+    const pv = document.createElement('button');
+    pv.className = 'btn small ghost';
+    pv.setAttribute('data-preview', c.id);
+    pv.textContent = '🧪 Probar';
+    actions.appendChild(pv);
+  }
+
   function renderShop() {
     const ch = CH(); const mt = MT();
-    if (!ch || !mt || !ui.shopGrid) return;
-    if (ui.shopCoins) ui.shopCoins.textContent = String(mt.coins);
+    if (!ch || !ui.shopGrid) return;
+    if (!rosterSel || !ch.byId(rosterSel)) rosterSel = playerChar;
     ui.shopGrid.innerHTML = '';
     ch.LIST.forEach((c) => {
-      const st = mt.charStatus(c);
-      if (st.state === 'hidden') return;
-      const card = document.createElement('div');
-      card.className = 'shop-card' + (st.state === 'owned' ? ' owned' : '');
-      card.appendChild(faceSpan(c));
-      const info = document.createElement('div');
-      info.className = 'info';
-
-      const h = document.createElement('h4');
-      h.textContent = c.name;
-      info.appendChild(h);
-
-      const tag = document.createElement('p');
-      tag.className = 'tagline';
-      tag.textContent = 'Activa: ' + c.active.name + ' · Pasiva: ' + c.passive.name;
-      info.appendChild(tag);
-
-      const ab = document.createElement('p');
-      ab.className = 'ab';
-      ab.textContent = '⚡ ' + c.active.desc + ' (' + c.active.charges + ' cargas · ' + c.active.cd + ' s)';
-      info.appendChild(ab);
-
-      const pv = document.createElement('p');
-      pv.className = 'pv';
-      pv.textContent = '✦ ' + c.passive.desc;
-      info.appendChild(pv);
-
-      if (st.state === 'owned') {
-        const b = document.createElement('button');
-        b.className = 'btn small';
-        b.setAttribute('data-char', c.id);
-        b.textContent = c.id === playerChar ? '✓ Elegido' : 'Elegir';
-        info.appendChild(b);
-      } else if (st.state === 'buyable') {
-        const cost = document.createElement('div');
-        cost.className = 'cost';
-        cost.textContent = '🪙 ' + st.cost + ' monedas';
-        info.appendChild(cost);
-        const b = document.createElement('button');
-        b.className = 'btn small primary';
-        b.setAttribute('data-buy', c.id);
-        b.textContent = st.affordable ? 'Comprar' : 'Faltan monedas';
-        b.disabled = !st.affordable;
-        info.appendChild(b);
-      } else if (st.state === 'locked') {
-        const cost = document.createElement('div');
-        cost.className = 'cost';
-        cost.textContent = '🔒 ' + (st.reason || 'Bloqueado');
-        info.appendChild(cost);
+      const owned = !mt || mt.isUnlocked(c.id);
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'roster-char' + (c.id === rosterSel ? ' selected' : '') + (owned ? '' : ' locked');
+      b.setAttribute('data-roster', c.id);
+      b.setAttribute('aria-label', c.name);
+      b.appendChild(faceSpan(c));
+      const nm = document.createElement('span');
+      nm.className = 'cname';
+      nm.textContent = c.name;
+      b.appendChild(nm);
+      if (!owned) {
+        const lk = document.createElement('span');
+        lk.className = 'lock';
+        lk.textContent = '🔒';
+        b.appendChild(lk);
       }
+      ui.shopGrid.appendChild(b);
+    });
+    renderRosterDetail(rosterSel);
+  }
 
-      card.appendChild(info);
-      ui.shopGrid.appendChild(card);
+  // ---------------------------------------------------------
+  // Zona de pruebas: barra lateral de personajes + panel de daño
+  // ---------------------------------------------------------
+  function renderPreviewChars(selectedId) {
+    const ch = CH(); const mt = MT();
+    if (!ui.previewChars) return;
+    if (!ch) return;
+    if (!selectedId && global.Preview) selectedId = Preview.stats().charId;
+    ui.previewChars.innerHTML = '';
+    ch.LIST.forEach((c) => {
+      const owned = !mt || mt.isUnlocked(c.id);
+      const b = document.createElement('button');
+      b.className = 'preview-char' + (c.id === selectedId ? ' selected' : '');
+      b.setAttribute('type', 'button');
+      b.setAttribute('data-preview-char', c.id);
+      b.appendChild(faceSpan(c));
+      const nm = document.createElement('span');
+      nm.className = 'cname';
+      nm.textContent = c.name;
+      b.appendChild(nm);
+      if (!owned) {
+        const lk = document.createElement('span');
+        lk.className = 'lock';
+        lk.textContent = '🔒';
+        b.appendChild(lk);
+      }
+      ui.previewChars.appendChild(b);
     });
   }
 
-  function buyChar(id) {
-    const ch = CH(); const mt = MT();
-    if (!ch || !mt) return;
-    const c = ch.byId(id);
-    if (!c) return;
-    const res = mt.buyChar(c);
-    if (res.ok) {
-      if (!res.already) toast('¡' + c.name + ' desbloqueado!');
-      setChar(id);
-      renderShop(); renderMetaBar(); renderCharPickers();
-    } else {
-      toast(res.reason || 'No se pudo comprar');
+  function renderPreviewInfo() {
+    if (!ui.previewInfo || !global.Preview) return;
+    const s = Preview.stats();
+    const ch = CH();
+    const c = ch && s.charId ? ch.byId(s.charId) : null;
+    let html = '';
+    if (c) {
+      html += '<div class="nm">' + Utils.escapeHtml(c.name) + '</div>';
+      html += '<div>Activa: ' + Utils.escapeHtml(c.active.name) + ' · Pasiva: ' + Utils.escapeHtml(c.passive.name) + '</div>';
+    }
+    html += '<div>Daño por disparo: <span class="dmg">' + s.damage.toFixed(1) + '</span></div>';
+    html += '<div>Cadencia: <b>' + s.fireRate.toFixed(1) + '</b>/s · Velocidad: <b>' + Math.round(s.speed) + '</b> · Vida: <b>' + Math.round(s.hp) + '</b></div>';
+    if (s.active && s.active.name) {
+      const a = s.active;
+      const st = a.charges > 0 ? '<span class="dmg">lista (' + a.charges + '/' + a.max + ')</span>'
+        : '<span class="hint">recargando · faltan ' + Math.max(0, (a.killReq || 0) - (a.kills || 0)) + ' bajas</span>';
+      html += '<div>Activa [Espacio]: ' + st + '</div>';
+    }
+    if (s.buffText) html += '<div class="hint">Buff activo: ' + Utils.escapeHtml(s.buffText) + '</div>';
+    html += '<div>Último impacto: <b>' + s.lastHit.toFixed(1) + '</b> · Golpes: <b>' + s.hits + '</b></div>';
+    html += '<div>Daño total: <b>' + s.total.toFixed(0) + '</b> · DPS: <b>' + s.dps.toFixed(1) + '</b></div>';
+    html += '<span class="hint">WASD moverse · Flechas disparar · Espacio activa</span>';
+    ui.previewInfo.innerHTML = html;
+  }
+
+  function openPreview(charId) {
+    if (!global.Preview) return;
+    const id = charId || playerChar;
+    Preview.open(id);
+    renderPreviewChars(id);
+    renderPreviewInfo();
+    setScene('preview');
+    showOverlay(ui.ovPreview);
+    toast('Sala de pruebas: dispara al muñeco', 2400);
+  }
+
+  function closePreview() {
+    if (global.Preview) Preview.close();
+    ctx = Render.init(ui.canvas);   // el lienzo principal vuelve a ser el del juego
+    renderShop();
+    renderCharPickers();
+    setScene('menu');
+    showOverlay(ui.ovShop);
+  }
+
+  function selectPreviewChar(id) {
+    if (!global.Preview || !Preview.isOpen()) return;
+    Preview.setChar(id);
+    renderPreviewChars(id);
+    renderPreviewInfo();
+    // Solo se adopta como personaje propio si está desbloqueado.
+    const mt = MT();
+    const owned = !mt || mt.isUnlocked(id);
+    if (owned) {
+      saveChar(id);
+      playerChar = id;
+      const c = CH() && CH().byId(id);
+      if (c) playerSkin = Entities.normSkin(c.skin);
     }
   }
 
@@ -299,13 +399,13 @@
     if (ui.progStats) {
       ui.progStats.innerHTML = '';
       const chips = [
-        ['Monedas', mt.coins],
         ['Partidas', s.runs],
         ['Victorias', s.wins],
         ['Piso máximo', s.bestFloor],
         ['Enemigos', s.totalKills],
         ['Jefes', Object.keys(s.bosses || {}).length],
         ['Sucesos raros', s.events || 0],
+        ['Desafíos', Object.keys(s.challenges || {}).length + '/' + ((global.Challenges && global.Challenges.LIST.length) || 0)],
         ['Logros', mt.achievementCount() + '/' + mt.ACHIEVEMENTS.length],
       ];
       for (const pair of chips) {
@@ -334,6 +434,68 @@
       });
     }
     if (ui.progAchCount) ui.progAchCount.textContent = mt.achievementCount() + '/' + mt.ACHIEVEMENTS.length;
+  }
+
+  // ---------------------------------------------------------
+  // Desafíos (retos de partida con modificadores)
+  // ---------------------------------------------------------
+  function renderChallenges() {
+    const cl = global.Challenges;
+    if (!ui.challList || !cl) return;
+    const mt = MT();
+    ui.challList.innerHTML = '';
+    cl.LIST.forEach((c) => {
+      const done = mt && mt.challengeDone(c.id);
+      const card = document.createElement('div');
+      card.className = 'chall-card' + (done ? ' done' : '');
+      const ico = document.createElement('div');
+      ico.className = 'chall-icon';
+      ico.textContent = c.icon || '🔥';
+      card.appendChild(ico);
+      const body = document.createElement('div');
+      body.className = 'chall-body';
+      const h = document.createElement('h4');
+      h.textContent = c.name + (done ? ' ✓' : '');
+      body.appendChild(h);
+      const p = document.createElement('p');
+      p.textContent = c.desc;
+      body.appendChild(p);
+      const rw = document.createElement('div');
+      rw.className = 'chall-reward';
+      const rc = c.reward && CH() && CH().byId(c.reward);
+      rw.textContent = '★ Premio: ' + (rc ? rc.name : '—');
+      body.appendChild(rw);
+      card.appendChild(body);
+      const b = document.createElement('button');
+      b.className = 'btn small' + (done ? '' : ' primary');
+      b.setAttribute('data-challenge', c.id);
+      b.textContent = '▶ Jugar';
+      card.appendChild(b);
+      ui.challList.appendChild(card);
+    });
+  }
+
+  function startChallenge(id) {
+    const cl = global.Challenges;
+    const c = cl && cl.byId(id);
+    if (!c) return;
+    playSolo({ challenge: id });
+    toast('Desafío: ' + c.name, 2600);
+  }
+
+  // Avisos de personajes desbloqueados (por estadísticas o desafíos).
+  function pollUnlocks() {
+    const mt = MT();
+    if (!mt || !mt.drainUnlocked) return;
+    const newly = mt.drainUnlocked();
+    for (const id of newly) {
+      const c = CH() && CH().byId(id);
+      if (c) {
+        toast('🔓 ¡Personaje desbloqueado: ' + c.name + '!', 3400);
+        Sfx.play('win');
+      }
+    }
+    if (newly.length) { renderCharPickers(); renderMetaBar(); }
   }
 
   // ---------------------------------------------------------
@@ -472,13 +634,15 @@
   // ---------------------------------------------------------
   // Arranques de partida
   // ---------------------------------------------------------
-  function playSolo() {
+  function playSolo(opts) {
     Sfx.unlock();
     roomCode = '';
+    ctx = Render.init(ui.canvas);   // por si venimos de la zona de pruebas
     Game.setHandlers({ onEnd: onGameEnd, onPing: null });
     Game.start({
       mode: 'local',
-      localPlayers: [{ id: 'p0', name: myName('Isaac'), skin: playerSkin, char: playerChar, slot: 0, scheme: 'p1' }],
+      challenge: (opts && opts.challenge) || null,
+      localPlayers: [{ id: 'p0', name: myName('Jugador'), skin: playerSkin, char: playerChar, slot: 0, scheme: 'p1' }],
     });
     setScene('playing');
   }
@@ -599,6 +763,7 @@
     const seed = Utils.makeSeed();
     hostSeed = seed;
     hostFloor = 1;
+    ctx = Render.init(ui.canvas);   // por si venimos de la zona de pruebas
     Game.setHandlers({ onEnd: onGameEnd, onPing: null });
     Game.start({
       mode: 'host',
@@ -701,6 +866,7 @@
   }
 
   function beginClientRun() {
+    ctx = Render.init(ui.canvas);   // por si venimos de la zona de pruebas
     Game.setHandlers({
       onEnd: onGameEnd,
       onPing: (rtt) => { ui.tbPing.textContent = rtt + ' ms'; },
@@ -729,17 +895,19 @@
       ui.endTitle.textContent = 'Fin de la partida';
       ui.endText.textContent = 'Habéis caído en el piso ' + g.floorNum + '. Enemigos eliminados: ' + g.stats.kills + '.';
     }
-    // Recompensa de progreso persistente (una vez por partida).
+    // Progreso persistente (una vez por partida). Ya no hay monedas: lo que
+    // importa es si el reto/desafío desbloquea personajes.
     const mt = MT();
     if (mt && !runRewarded) {
       runRewarded = true;
       const r = mt.finishRun(Game.runSummary());
-      if (ui.endCoins) {
-        ui.endCoins.textContent = '+' + r.coins + ' 🪙 de progreso (total: ' + r.total + ')';
+      if (ui.endUnlocked) {
+        const names = (r.newly || []).map((id) => { const c = CH() && CH().byId(id); return c ? c.name : id; });
+        ui.endUnlocked.textContent = names.length ? ('🔓 ¡Has desbloqueado: ' + names.join(', ') + '!') : '';
       }
       renderMetaBar();
-    } else if (ui.endCoins) {
-      ui.endCoins.textContent = '';
+    } else if (ui.endUnlocked) {
+      ui.endUnlocked.textContent = '';
     }
     setTimeout(() => { if (scene === 'playing') { showOverlay(ui.ovEnd); } }, 900);
   }
@@ -833,12 +1001,19 @@
       const view = Game.view();
       Render.frame(view);
       updateTopbar(view);
+    } else if (scene === 'preview' && global.Preview && Preview.isOpen()) {
+      acc = 0;
+      Preview.step(dt);
+      Preview.draw();
+      previewInfoAcc += dt;
+      if (previewInfoAcc > 0.1) { previewInfoAcc = 0; renderPreviewInfo(); }
     } else {
       acc = 0;
       paintIdle(dt);
     }
 
     pollAchievements();
+    pollUnlocks();
     if (Input.consume('KeyM')) toggleMute();
     if (Input.consume('KeyH')) toggleHitboxes();
     if (Input.consume('Escape')) togglePause();
@@ -884,6 +1059,9 @@
         break;
       case 'help': showOverlay(ui.ovHelp); break;
       case 'shop': renderShop(); showOverlay(ui.ovShop); break;
+      case 'challenges': renderChallenges(); showOverlay(ui.ovChallenges); break;
+      case 'preview': openPreview(playerChar); break;
+      case 'preview-back': closePreview(); break;
       case 'progress': renderProgress(); showOverlay(ui.ovProgress); break;
       case 'wipe-ach': {
         const mt = MT();
@@ -916,15 +1094,31 @@
 
   function bindUI() {
     document.addEventListener('click', (e) => {
-      const buy = e.target.closest('[data-buy]');
-      if (buy && buy.getAttribute('data-buy') != null) {
-        buyChar(buy.getAttribute('data-buy'));
+      const rb = e.target.closest('[data-roster]');
+      if (rb && rb.getAttribute('data-roster') != null) {
+        rosterSel = rb.getAttribute('data-roster');
+        renderShop();
+        return;
+      }
+      const pvb = e.target.closest('[data-preview]');
+      if (pvb && pvb.getAttribute('data-preview') != null) {
+        openPreview(pvb.getAttribute('data-preview'));
+        return;
+      }
+      const chb = e.target.closest('[data-challenge]');
+      if (chb && chb.getAttribute('data-challenge') != null) {
+        startChallenge(chb.getAttribute('data-challenge'));
         return;
       }
       const cb = e.target.closest('[data-char]');
       if (cb && cb.getAttribute('data-char') != null) {
         setChar(cb.getAttribute('data-char'));
         if (scene === 'menu' || scene === 'lobby') renderShop();
+        return;
+      }
+      const pcb = e.target.closest('[data-preview-char]');
+      if (pcb && pcb.getAttribute('data-preview-char') != null) {
+        selectPreviewChar(pcb.getAttribute('data-preview-char'));
         return;
       }
       const btn = e.target.closest('[data-action]');

@@ -21,15 +21,16 @@
   // genera distinto.
   // ---------------------------------------------------------
   const THEMES = [
-    { name: 'Sótano',       wall: '#2b2440', floor: '#1a1526', accent: '#6d5aa0', target: 11, branch: 2, obs: 'grid',   density: 1.0, tint: 'rgba(120,90,180,0.10)' },
-    { name: 'Cuevas',       wall: '#3a3023', floor: '#221b12', accent: '#9a7f52', target: 13, branch: 2, obs: 'blobs',  density: 1.1, tint: 'rgba(180,140,80,0.10)' },
-    { name: 'Catacumbas',   wall: '#26303a', floor: '#161d24', accent: '#54839a', target: 15, branch: 3, obs: 'ring',   density: 0.9, tint: 'rgba(90,150,180,0.10)' },
-    { name: 'Vientre',      wall: '#3a1f2a', floor: '#220f16', accent: '#a04a63', target: 16, branch: 2, obs: 'blobs',  density: 1.2, tint: 'rgba(190,70,100,0.10)' },
-    { name: 'Desierto',     wall: '#40361f', floor: '#281f10', accent: '#c9a24a', target: 17, branch: 3, obs: 'sparse', density: 0.7, tint: 'rgba(220,190,90,0.10)' },
-    { name: 'Criohielo',    wall: '#223a44', floor: '#102028', accent: '#5fb0c9', target: 18, branch: 3, obs: 'grid',   density: 1.0, tint: 'rgba(120,210,240,0.12)' },
-    { name: 'Infierno',     wall: '#451c14', floor: '#2a0d08', accent: '#e0622c', target: 19, branch: 3, obs: 'dense',  density: 1.3, tint: 'rgba(255,120,50,0.12)' },
-    { name: 'Vacío',        wall: '#1c1c26', floor: '#0c0c12', accent: '#8a6cc9', target: 20, branch: 4, obs: 'sparse', density: 0.6, tint: 'rgba(140,110,220,0.14)' },
-    { name: 'Cielo',        wall: '#2a3550', floor: '#161d30', accent: '#bcd4ff', target: 21, branch: 4, obs: 'ring',   density: 0.9, tint: 'rgba(200,220,255,0.14)' },
+    // decor = patrón del SUELO · wallStyle = patrón del MURO · prop = adorno/antorcha
+    { name: 'Sótano',     wall: '#2b2440', wall2: '#191430', floor: '#1a1526', accent: '#8a6fbe', decor: 'tile',    wallStyle: 'brick',     prop: '#ffb648', target: 11, branch: 2, obs: 'grid',   density: 1.0, tint: 'rgba(120,90,180,0.10)' },
+    { name: 'Cuevas',     wall: '#3a3023', wall2: '#251d13', floor: '#221b12', accent: '#c9a45c', decor: 'cave',    wallStyle: 'rock',      prop: '#6fd0c0', target: 13, branch: 2, obs: 'blobs',  density: 1.1, tint: 'rgba(180,140,80,0.10)' },
+    { name: 'Catacumbas', wall: '#26303a', wall2: '#161f27', floor: '#161d24', accent: '#6fb6cf', decor: 'tomb',    wallStyle: 'crypt',     prop: '#9fe0ff', target: 15, branch: 3, obs: 'ring',   density: 0.9, tint: 'rgba(90,150,180,0.10)' },
+    { name: 'Vientre',    wall: '#3a1f2a', wall2: '#26121b', floor: '#220f16', accent: '#e06a8c', decor: 'flesh',   wallStyle: 'flesh',     prop: '#ff8fb0', target: 16, branch: 2, obs: 'blobs',  density: 1.2, tint: 'rgba(190,70,100,0.10)' },
+    { name: 'Desierto',   wall: '#40361f', wall2: '#2a2312', floor: '#281f10', accent: '#e8c25c', decor: 'sand',    wallStyle: 'sandstone', prop: '#ffd98a', target: 17, branch: 3, obs: 'sparse', density: 0.7, tint: 'rgba(220,190,90,0.10)' },
+    { name: 'Criohielo',  wall: '#223a44', wall2: '#13262e', floor: '#102028', accent: '#7fd0e8', decor: 'ice',     wallStyle: 'ice',       prop: '#c8f0ff', target: 18, branch: 3, obs: 'grid',   density: 1.0, tint: 'rgba(120,210,240,0.12)' },
+    { name: 'Infierno',   wall: '#451c14', wall2: '#2a0d08', floor: '#2a0d08', accent: '#ff7a3c', decor: 'ember',   wallStyle: 'obsidian',  prop: '#ff9a3c', target: 19, branch: 3, obs: 'dense',  density: 1.3, tint: 'rgba(255,120,50,0.12)' },
+    { name: 'Vacío',      wall: '#1c1c26', wall2: '#0e0e16', floor: '#0c0c12', accent: '#a98cf0', decor: 'void',    wallStyle: 'void',      prop: '#b9a3ff', target: 20, branch: 4, obs: 'sparse', density: 0.6, tint: 'rgba(140,110,220,0.14)' },
+    { name: 'Cielo',      wall: '#2a3550', wall2: '#1a2238', floor: '#161d30', accent: '#cfe0ff', decor: 'cloud',   wallStyle: 'marble',    prop: '#ffe9a8', target: 21, branch: 4, obs: 'ring',   density: 0.9, tint: 'rgba(200,220,255,0.14)' },
   ];
   const theme = (floorNum) => THEMES[((Math.max(1, floorNum | 0) - 1) % THEMES.length + THEMES.length) % THEMES.length];
 
@@ -140,6 +141,9 @@
         doors: { up: false, down: false, left: false, right: false },
         locks: { up: false, down: false, left: false, right: false },
         bossDoor: { up: false, down: false, left: false, right: false },
+        // Qué sala especial hay al otro lado de cada puerta ('treasure' | 'shop'
+        // | null). Sirve para dibujar marcos distintos sin mirar el calabozo.
+        doorKinds: { up: null, down: null, left: null, right: null },
         obstacles: [],
         visited: false,
         cleared: type === 'start' || type === 'treasure' || type === 'shop',
@@ -227,20 +231,21 @@
 
     // ---------- Puertas con llave ----------
     // Se cierran con llave las entradas a las salas opcionales: usar una llave
-    // para entrar en el tesoro (siempre) y en la tienda (según el piso). Así las
-    // llaves tienen utilidad sin bloquear nunca el camino hacia el jefe.
+    // para entrar SIEMPRE en el tesoro y en la tienda. Así las llaves tienen
+    // utilidad sin bloquear nunca el camino hacia el jefe. Cada puerta recuerda
+    // además qué sala especial tiene detrás (doorKinds) para dibujar un marco
+    // propio y distinguir la tienda del tesoro de un vistazo.
     function lockRoom(room) {
       for (const d of DIRS) {
         if (!room.doors[d.n]) continue;
         room.locks[d.n] = true;
+        room.doorKinds[d.n] = room.type;
         const nb = rooms[key(room.gx + d.dx, room.gy + d.dy)];
-        if (nb) nb.locks[OPPOSITE[d.n]] = true;
+        if (nb) { nb.locks[OPPOSITE[d.n]] = true; nb.doorKinds[OPPOSITE[d.n]] = room.type; }
       }
     }
     if (deadEnds[0] && deadEnds[0].type === 'treasure') lockRoom(deadEnds[0]);
-    if (deadEnds[1] && deadEnds[1].type === 'shop' && (floorNum >= 2 || rng() < 0.5)) {
-      lockRoom(deadEnds[1]);
-    }
+    if (deadEnds[1] && deadEnds[1].type === 'shop') lockRoom(deadEnds[1]);
 
     // ---------- Obstáculos ----------
     for (const r of list) {

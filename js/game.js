@@ -10,8 +10,8 @@
   const C = Utils.C;
   const E = Entities;
   const r1 = Utils.r1;
-  const SEND_HZ = 1 / 20;
-  const INPUT_HZ = 1 / 30;
+  const SEND_HZ = 1 / 40;
+  const INPUT_HZ = 1 / 60;
 
   // Número finito garantizado (evita que un NaN procedente de la red o de un
   // cálculo inesperado se propague a la simulación y al renderizado).
@@ -2203,7 +2203,7 @@
       if (lp.srvX != null) {
         const ex = lp.srvX - lp.x, ey = lp.srvY - lp.y;
         const dist = Math.hypot(ex, ey);
-        if (dist > 110) { lp.x = lp.srvX; lp.y = lp.srvY; }
+        if (dist > 40) { lp.x = lp.srvX; lp.y = lp.srvY; }
         else {
           const k = 1 - Math.exp(-10 * dt);
           lp.x += ex * k; lp.y += ey * k;

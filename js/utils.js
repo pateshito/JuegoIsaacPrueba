@@ -16,7 +16,7 @@
     DOOR_HALF: 58,     // semi-anchura de la boca de la puerta
     MAX_PLAYERS: 4,
     FLOORS: 9,
-    RENDER_DELAY: 0.13, // segundos de retardo de interpolación en el cliente
+    RENDER_DELAY: 0.05, // segundos de retardo de interpolación en el cliente
   };
   C.ROOM_W = C.TILE * C.COLS;                        // 728
   C.ROOM_H = C.TILE * C.ROWS;                        // 392

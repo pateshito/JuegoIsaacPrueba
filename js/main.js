@@ -80,6 +80,7 @@
   function hide(el) { if (el) el.classList.add('hidden'); }
 
   function toast(msg, ms) {
+    if (Game.G.paused) return;
     ui.toast.textContent = msg;
     show(ui.toast);
     clearTimeout(toastTimer);
@@ -819,7 +820,7 @@
   }
 
   function handleClientData(msg) {
-    if (!msg || typeof msg !== 'object') return;
+  if (!msg || typeof msg !== 'object') return;
     switch (msg.t) {
       case 'welcome':
         myClientId = msg.id;
@@ -861,6 +862,20 @@
         toast('El anfitrión cerró la sala.', 3600);
         quitToMenu();
         break;
+      
+      // ---> NUEVOS CASOS: El anfitrión avisa que se fue/volvió <---
+      case 'paused':
+        Game.setPaused(true);
+        ui.toast.textContent = '⏸ Partida pausada: El anfitrión cambió de pestaña';
+        show(ui.toast);
+        clearTimeout(toastTimer); // Evita que el aviso desaparezca solo
+        break;
+      case 'resumed':
+        Game.setPaused(false);
+        hide(ui.toast);
+        break;
+      // --------------------------------------------------------
+      
       default: break;
     }
   }
@@ -1198,6 +1213,30 @@
       document.body.removeChild(ta);
     }
   }
+  let hostTabHidden = false;
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      // Si el anfitrión oculta la pestaña mientras juega, pausa y avisa a todos
+      if (scene === 'playing' && Game.G.running && !Game.G.paused && Net.isHost) {
+        Game.setPaused(true);
+        hostTabHidden = true;
+        Net.broadcast({ t: 'paused', reason: 'host_tab' });
+        
+        // Mostramos el aviso sin temporizador para que persista
+        ui.toast.textContent = '⏸ Partida pausada: El anfitrión cambió de pestaña';
+        show(ui.toast);
+        clearTimeout(toastTimer);
+      }
+    } else {
+      // Cuando el anfitrión vuelve a la pestaña, reanuda automáticamente
+      if (scene === 'playing' && Game.G.running && Game.G.paused && hostTabHidden && Net.isHost) {
+        Game.setPaused(false);
+        hostTabHidden = false;
+        Net.broadcast({ t: 'resumed' });
+        hide(ui.toast);
+      }
+    }
+  });
 
   // ---------------------------------------------------------
   // Arranque

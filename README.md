@@ -1,6 +1,6 @@
 # Llanto de Isaac 🍼
 
-Prototipo de **roguelike 2D** inspirado en *The Binding of Isaac*, hecho con **HTML, CSS y JavaScript puro** (sin frameworks ni paso de compilación). Se puede jugar **en solitario**, en **cooperativo local** (2 jugadores en el mismo teclado) o **online en salas de 1 a 4 jugadores**.
+Prototipo de **roguelike 2D** inspirado en *The Binding of Isaac*, hecho con **HTML, CSS y JavaScript puro** (sin frameworks ni paso de compilación). Se puede jugar **en solitario** o **online en salas de 1 a 4 jugadores**.
 
 El objetivo es sencillo: baja los **9 pisos** del calabozo, derrota al **jefe** de cada piso y pisa la trampilla para descender. **Cada piso tiene su propio diseño**, y es más grande y peligroso que el anterior. Si todos los jugadores caen, se acaba la partida. Entre partidas acumulas **progreso** para **desbloquear personajes** con habilidades propias.
 
@@ -8,14 +8,15 @@ El objetivo es sencillo: baja los **9 pisos** del calabozo, derrota al **jefe** 
 
 ## 🎮 Controles
 
-| Acción | Jugador 1 | Jugador 2 (coop local) |
-| --- | --- | --- |
-| Moverse | `W` `A` `S` `D` | `I` `J` `K` `L` |
-| Disparar | Flechas `↑` `←` `↓` `→` | `T` `F` `G` `H` |
-| Habilidad activa | `Espacio` | `Y` |
-| Ver mejoras (mantener) | `Tab` | `Tab` |
-| Pausa | `Esc` | `Esc` |
-| Silenciar | `M` | `M` |
+| Acción | Tecla |
+| --- | --- |
+| Moverse | `W` `A` `S` `D` |
+| Disparar | Flechas `↑` `←` `↓` `→` |
+| Habilidad activa | `Espacio` |
+| Ver mejoras (mantener) | `Tab` |
+| Mostrar/ocultar hitboxes | `H` |
+| Pausa | `Esc` |
+| Silenciar | `M` |
 
 - Moverse en una dirección y disparar en otra es totalmente compatible (8 direcciones de disparo).
 - En modo online cada jugador usa **su propio teclado**: se mueve con `WASD`, dispara con las flechas y usa su **habilidad** con `Espacio`.
@@ -24,14 +25,11 @@ El objetivo es sencillo: baja los **9 pisos** del calabozo, derrota al **jefe** 
 
 ## ▶️ Cómo jugar
 
-Antes de empezar, escribe tu **nombre** y elige tu **personaje** en el menú (cada uno tiene estadísticas propias, una **pasiva** permanente y una **habilidad activa**). El nombre aparece también en la pantalla *Unirse a una sala*. El nombre y el personaje se recuerdan en el navegador y se usan en todos los modos: en solitario, cooperativo local y online (los demás jugadores ven tu personaje).
+Antes de empezar, escribe tu **nombre** y elige tu **personaje** en el menú (cada uno tiene estadísticas propias, una **pasiva** permanente y una **habilidad activa**). El nombre aparece también en la pantalla *Unirse a una sala*. El nombre y el personaje se recuerdan en el navegador y se usan en todos los modos: en solitario y online (los demás jugadores ven tu personaje).
 
 ### En solitario
 1. Abre el juego.
 2. Pulsa **Jugar solo**.
-
-### Cooperativo local (2 jugadores, un teclado)
-1. Pulsa **Cooperativo local (2p)**.
 
 ### Online (1 a 4 jugadores)
 1. **Anfitrión**: pulsa **Crear sala online**. Aparecerá un **código de 4 caracteres**; compártelo (botones *Copiar código* / *Copiar enlace*).
@@ -61,14 +59,15 @@ No hay servidor propio: la partida se juega **Peer-to-Peer (WebRTC)** usando el 
 - Cada habitación se **cierra** hasta que derrotas a todos los enemigos; entonces se abren las puertas.
 - **Gracia al entrar**: al cruzar una puerta, los jugadores son invulnerables unos instantes y los enemigos aparecen con un breve margen (y nunca pegados a la puerta por la que entras), para que no te hagan daño nada más aparecer.
 - El **minimapa** (arriba a la derecha) muestra las salas visitadas, las puertas y el tipo de habitación. Las salas contiguas aún **sin explorar** se marcan con **«?»** y *no se vuelven a ocultar* al moverte a otra habitación.
-- Tipos de sala: **inicio**, **normal**, **tesoro**, **tienda** (los objetos se compran con monedas) y **jefe**. Cuanto más bajas, más salas por piso (hasta 22).
-- **Cada piso tiene su propio diseño**: cambian los colores, el tipo de obstáculos y la densidad, **y también los enemigos que lo pueblan** (los duros solo aparecen en los pisos avanzados; cada piso tiñe a sus enemigos con su color). Además, **cada sala elige un diseño distinto** dentro de su piso (rejilla, columnas, esquinas, cruz, anillo, racimos, arena, disperso…), así que dos habitaciones del mismo piso no se ven iguales. `Sótano`, `Cuevas`, `Catacumbas`, `Vientre`, `Desierto`, `Criohielo`, `Infierno`, `Vacío` y `Cielo`.
+- Tipos de sala: **inicio**, **normal**, **tesoro**, **tienda** (los objetos se compran con monedas) y **jefe**. Cuanto más bajas, más salas por piso (hasta 22). La **puerta que lleva a la sala del jefe** tiene su **propio marco** (filo rojo, pinchos y una calavera, marcado en las dos caras del vano) para reconocerla de un vistazo.
+- **Hitboxes visibles**: tu personaje usa una **hitbox mucho más pequeña que su dibujo** (radio 6) **sobre su torso** para que esquivar sea justo. Con la tecla **`H`** activas o desactivas estas marcas: cuando están activadas, si un **enemigo o proyectil** entra en tu radio cercano (unos 155 px) se dibuja su **caja de colisión** luminosa (roja para jefes, naranja para enemigos y del color de la bala para proyectiles); la tuya es un **circulito relleno** luminoso sobre el torso.
+- **Cada piso tiene su propio diseño**: cambian los colores, el tipo de obstáculos y la densidad, **y también los enemigos que lo pueblan** (los duros solo aparecen en los pisos avanzados; **ningún piso repite los tipos de enemigo del piso anterior**; cada piso tiñe a sus enemigos con su color). La **sala del jefe** usa **esbirros del propio piso**. Además, **cada sala elige un diseño distinto** dentro de su piso (rejilla, columnas, esquinas, cruz, anillo, racimos, arena, disperso…), así que dos habitaciones del mismo piso no se ven iguales. `Sótano`, `Cuevas`, `Catacumbas`, `Vientre`, `Desierto`, `Criohielo`, `Infierno`, `Vacío` y `Cielo`.
 - Algunas salas opcionales (**tesoro** siempre, **tienda** a partir del piso 2) tienen la puerta con **candado dorado**: hace falta una **llave 🔑** para abrirla. El camino al jefe nunca se cierra.
 - **Al despejar una sala** ya no cae botín de los enemigos: la recompensa (monedas, y a veces corazón o llave) aparece en el centro al terminar. Con cierta probabilidad aparece también un **cofre**:
   - **Cofre gratis** 🎁: suelta monedas y, a veces, un corazón o una llave.
   - **Cofre cerrado** 🔒 (cuesta 1 llave): garantiza un **objeto** para todo el equipo más algunas monedas. La sala del **tesoro** siempre trae además un cofre gratis.
 - **Sellado al aparecer**: lo que acaba de generarse (botín al despejar, cofres) no se puede coger durante un instante (~1 s). La **recompensa del jefe** (objeto, llave y trampilla) sale **sellada 2 s** con un **contador visible** encima antes de poder recogerla o bajar de piso.
-- Enemigos: `fly` (mosca), `gaper`, `charger` (embiste), `spitter` (escupe), `hopper` (salta), `fat` (gordo, se divide), **`ghost`** (espectro que **atraviesa obstáculos**) y **`sniper`** (francotirador que dispara de lejos), más **8 jefes** distintos, cada uno con patrón y estadísticas propias (ráfagas, embestidas, espirales, teletransporte, saltos, plumas, calaveras y aparición de esbirros). **Cada piso sortea su jefe entre al menos 3 posibles** (solo aparece uno) y la **vida y dificultad de los jefes suben piso a piso**. La IA es más viva: los enemigos **anticipan tu movimiento** al perseguir y disparar, los que disparan **mantienen la distancia y serpentean**, y los cargadores **avisan antes de embestir** y quedan vulnerables un instante si fallan.
+- Enemigos: `fly` (mosca), `gaper`, `charger` (embiste), `spitter` (escupe), `hopper` (salta), `fat` (gordo, se divide), **`ghost`** (espectro que **atraviesa obstáculos**) y **`sniper`** (francotirador que dispara de lejos), más **8 jefes** distintos, cada uno con patrón y estadísticas propias (ráfagas, embestidas, espirales, teletransporte, saltos, plumas, calaveras y aparición de esbirros). **Cada piso sortea su jefe entre al menos 3 posibles** (solo aparece uno). Los **jefes son el reto principal**, **avisan siempre antes de atacar** (aros, líneas de mira, abanicos…) para darte tiempo a reaccionar —ninguno embiste por sorpresa— y **disparan muchos más proyectiles**; siguen una **progresión clara**: suben **vida** (parten de 175 y crecen fuerte por piso), **velocidad**, **velocidad de sus balas** y **cadencia de ataque**; en los pisos **7 a 9** sus golpes (contacto y proyectiles) hacen **2 de daño** en vez de 1. La IA es más viva: los enemigos **anticipan tu movimiento** al perseguir y disparar, los que disparan **mantienen la distancia y serpentean**, y los cargadores (enemigos y jefes) **avisan antes de embestir** y quedan vulnerables un instante si fallan.
 - **Botín de equipo**: recoge **corazones** (al curarte, curas a **todos**), **monedas** y **llaves** (compartidas por el grupo) y objetos de los pedestales.
 - **Curaciones y resistencias más modestas**: los corazones curan menos, las regeneraciones son lentas, el robo de vida se acumula (medio corazón cada dos bajas) y la armadura está topada (como mucho 2 puntos). También hay **un dibujo distinto para cada uno de los ~50 objetos**.
 - Hay **unos 50 objetos** repartidos en **5 niveles de rareza**: común, poco común, raro, épico y **legendario** (rarísimo). Unos afectan a daño, cadencia, velocidad, proyectil extra, balas perforantes/rebotantes/teledirigidas, armadura, regeneración, escudo, vidas extra, robo de vida… y a la **Brújula** y el **Mapa del piso**.
@@ -76,8 +75,8 @@ No hay servidor propio: la partida se juega **Peer-to-Peer (WebRTC)** usando el 
 - Otros objetos dan **habilidades únicas**: fuego, veneno, hielo, explosiones, rayos en cadena, bumerán, **moscas familiares** que orbitan, imán de monedas, golpe cargado, espinas que devuelven daño, ráfaga doble, codicia y empuje.
 - Las habilidades **sinergizan** entre sí (12 combinaciones): fuego + veneno = «Nube tóxica ardiente», explosión + rebotes = «Metralla», hielo + perforante = «Escarcha cortante», cadena + teledirigido = «Tormenta dirigida», y más. El globo anticipa las sinergias con **⚡ Sinergia** antes de coger el objeto.
 - Al acercarte a un pedestal aparece un **globo** con el nombre, la rareza y lo que suma o resta el objeto (y el precio, si es de la tienda).
-- **Personajes**: hay **14 personajes** con estadísticas distintas, una **pasiva** siempre activa y una **habilidad activa** con **cargas**. Al limpiar una sala se **reduce 15 s** el enfriamiento de la habilidad. Pulsa `Espacio` (o `Y` en coop local) para usarla. (Por ejemplo, **Magdalena** ya no regenera: tiene un **15% de curarse un corazón al limpiar** una sala.)
-- **Reanimaciones**: en cooperativo **cada jugador se reanima una vez por piso**; en solitario tienes una reanimación y después caes. Los objetos **Vida extra** y **Pluma de fénix** suman **+1 reanimación por piso** (la pluma solo aparece en la tienda).
+- **Personajes**: hay **14 personajes** con estadísticas distintas, una **pasiva** siempre activa y una **habilidad activa** con **cargas**. Al limpiar una sala se **reduce 15 s** el enfriamiento de la habilidad. Pulsa `Espacio` para usarla. (Por ejemplo, **Magdalena** ya no regenera: tiene un **15% de curarse un corazón al limpiar** una sala.)
+- **Reanimaciones**: en una partida online **cada jugador se reanima una vez por piso**; en solitario tienes una reanimación y después caes. Los objetos **Vida extra** y **Pluma de fénix** suman **+1 reanimación por piso** (la pluma solo aparece en la tienda).
 - Derrota al jefe, baja por la **trampilla** y repite en los pisos 2 a 9. Al superar el piso 9, **¡victoria!**
 
 ### Progreso permanente (meta)
@@ -161,7 +160,9 @@ Se usan etiquetas `<script>` clásicas (sin módulos ES) para que el juego tambi
 ## 🧪 Salud del proyecto
 
 - La simulación y el renderizado están verificados con un conjunto de pruebas sin navegador (Node): generación de calabozo determinista, **variedad de diseños de sala**, transiciones de puerta y **temas por piso**, progresión completa (pisos → jefe → trampilla → victoria), objetos y rarezas, **habilidades únicas y sinergias** (fuego/veneno con daño con el tiempo, explosión en área, rayo en cadena, moscas familiares, imán, espinas, codicia, bumerán, empuje, serialización del estado de los enemigos y globo con sinergias), **recompensa al despejar salas y cofres (gratis y con llave)**, **nueva IA y enemigos (espectro, francotirador)**, cerraduras con llave, patrones de jefe, globo de objetos, ausencia de excepciones y una prueba de integración de la interfaz.
-- También se prueban el **equilibrio y el contenido nuevos**: el **sellado al aparecer** (botín ~1 s y recompensa de jefe 2 s con contador), las **bolsas de jefes por piso** (≥3 candidatos, uno al azar y determinista), la **progresión de dificultad de los jefes**, los **enemigos propios de cada piso** y la **pasiva nueva de Magdalena**.
+- También se prueban el **equilibrio y el contenido nuevos**: el **sellado al aparecer** (botín ~1 s y recompensa de jefe 2 s con contador), las **bolsas de jefes por piso** (≥3 candidatos, uno al azar y determinista), la **progresión y el endurecimiento de los jefes** (vida, velocidad, cadencia y daño 2 en pisos 7-9), los **enemigos propios de cada piso** y la **pasiva nueva de Magdalena**.
+- Y, en una prueba aparte, la **puerta del jefe con su marco propio** (marcada en ambas caras del vano), la **hitbox del jugador sobre el torso** (radio 6, **circulito relleno**) y la **visualización de hitboxes** con la tecla **`H`** (enemigos y proyectiles cercanos muestran su caja de colisión; los lejanos no; la marca del jugador se oculta y se vuelve a mostrar).
+- Una prueba de la **ronda 4** cubre además la **puerta del jefe**, los **enemigos completamente distintos piso a piso** (ningún piso repite tipos del anterior; los esbirros del jefe salen del piso), el **telegrafiado de los jefes** (todos avisan antes de su primer ataque, el cargador nunca embiste sin su línea de mira, y todos disparan más proyectiles de tamaño normal) y la **hitbox pequeña y rellena**.
 - También se prueban los **personajes** (activa, pasiva y estadísticas), el **progreso persistente** (monedas, compra y requisitos, logros y avisos, borrado selectivo y total, persistencia), los **objetos compartidos**, las **reanimaciones** y el **panel de mejoras**.
 - El protocolo de red (anfitrión y cliente) también está cubierto con un PeerJS simulado: *hello/welcome*, lobby, *start*, instantáneas de estado, `ping/pong`, jugador que entra/sale, sala llena y fin de partida.
 

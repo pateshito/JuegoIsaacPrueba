@@ -28,6 +28,9 @@
   C.INNER_B = C.ROOM_Y + C.ROOM_H - C.WALL;
   C.CX = C.ROOM_X + C.ROOM_W / 2;
   C.CY = C.ROOM_Y + C.ROOM_H / 2;
+  // Desplazamiento vertical del punto de daño del jugador: la hitbox va en el
+  // torso (un poco por debajo del centro), no en la cabeza ni en los pies.
+  C.PLAYER_HURT_DY = 7;
 
   // ---------- Matemáticas ----------
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);

@@ -139,6 +139,7 @@
         gx, gy, type,
         doors: { up: false, down: false, left: false, right: false },
         locks: { up: false, down: false, left: false, right: false },
+        bossDoor: { up: false, down: false, left: false, right: false },
         obstacles: [],
         visited: false,
         cleared: type === 'start' || type === 'treasure' || type === 'shop',
@@ -205,6 +206,16 @@
     for (const r of list) if (r.dist > boss.dist) boss = r;
     if (boss !== start) boss.type = 'boss';
 
+    // ---------- Puerta del jefe ----------
+    // Marcamos la puerta que lleva a la sala del jefe (en ambos lados del vano)
+    // para que se dibuje con un marco propio y se reconozca a distancia.
+    for (const d of DIRS) {
+      if (!boss.doors[d.n]) continue;
+      boss.bossDoor[d.n] = true;
+      const nb = rooms[key(boss.gx + d.dx, boss.gy + d.dy)];
+      if (nb) nb.bossDoor[OPPOSITE[d.n]] = true;
+    }
+
     // ---------- Habitaciones especiales en los callejones ----------
     const degree = (r) => DIRS.reduce((n, d) => n + (r.doors[d.n] ? 1 : 0), 0);
     let deadEnds = list.filter((r) => r !== start && r !== boss && degree(r) === 1);
@@ -250,20 +261,20 @@
   const get = (floorObj, gx, gy) => floorObj.rooms[key(gx, gy)] || null;
 
   // ---------------------------------------------------------
-  // Enemigos por piso: cada piso tiene su propia mezcla. Los primeros
-  // traen bichos simples; según bajas aparecen más tipos y más duros.
-  // (Cada piso se ve y se juega distinto.)
+  // Enemigos por piso: cada piso estrena una mezcla COMPLETAMENTE distinta a
+  // la del piso anterior (no repite tipos dos pisos seguidos); los enemigos
+  // más duros (francotirador) solo salen en pisos avanzados.
   // ---------------------------------------------------------
   const FLOOR_POOLS = [
-    ['fly', 'gaper'],
-    ['fly', 'gaper', 'hopper'],
-    ['fly', 'gaper', 'hopper', 'spitter'],
-    ['gaper', 'hopper', 'spitter', 'charger'],
-    ['gaper', 'spitter', 'charger', 'fat'],
-    ['hopper', 'spitter', 'charger', 'fat', 'ghost'],
-    ['spitter', 'charger', 'fat', 'ghost', 'sniper'],
-    ['charger', 'fat', 'ghost', 'sniper', 'spitter'],
-    ['charger', 'fat', 'ghost', 'sniper', 'gaper'],
+    ['fly', 'gaper'],                       // 1 · Sótano
+    ['hopper', 'spitter'],                  // 2 · Cuevas
+    ['charger', 'fat'],                     // 3 · Catacumbas
+    ['ghost', 'sniper'],                    // 4 · Vientre
+    ['fly', 'gaper', 'hopper'],             // 5 · Desierto
+    ['spitter', 'charger', 'fat'],          // 6 · Criohielo
+    ['ghost', 'sniper', 'fly'],             // 7 · Infierno
+    ['gaper', 'hopper', 'charger'],         // 8 · Vacío
+    ['spitter', 'fat', 'ghost', 'sniper'],  // 9 · Cielo
   ];
 
   // Plan de enemigos de una habitación (lo usa el anfitrión al entrar)
@@ -271,6 +282,7 @@
     if (room.type === 'start' || room.type === 'treasure' || room.type === 'shop') return [];
     const f = Math.max(1, floorNum | 0);
     const rng = Utils.mulberry32(Utils.hash(room.key + '#e' + seed + '#' + floorNum));
+    const allowed = FLOOR_POOLS[(f - 1) % FLOOR_POOLS.length];
 
     if (room.type === 'boss') {
       const roster = (typeof Entities !== 'undefined' && Entities.BOSS_ROSTER) || ['boss'];
@@ -283,13 +295,16 @@
         bType = roster[(f - 1) % roster.length];
       }
       const plan = [{ type: bType, count: 1 }];
+      // Los esbirros del jefe son del propio piso (nunca de otro piso) y se
+      // prefieren los cuerpo a cuerpo para no castigar en exceso.
+      const melee = allowed.filter((t) => t !== 'spitter' && t !== 'sniper');
+      const spawnPool = melee.length ? melee : allowed;
       const n = Math.min(2, Math.floor((f - 1) / 2));
-      for (let i = 0; i < n; i++) plan.push({ type: 'gaper', count: 2 });
+      for (let i = 0; i < n; i++) plan.push({ type: Utils.pick(rng, spawnPool), count: 2 });
       return plan;
     }
 
     let budget = 2 + f * 1.7 + room.dist * 0.6;
-    const allowed = FLOOR_POOLS[(f - 1) % FLOOR_POOLS.length];
     const all = {
       fly: { type: 'fly', cost: 1, w: 3 },
       gaper: { type: 'gaper', cost: 1.4, w: 3 },

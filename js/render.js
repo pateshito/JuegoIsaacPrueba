@@ -12,6 +12,7 @@
   let ctx = null;
   let roomCache = new Map();
   let cacheFloorTag = '';
+  let showHitboxes = true;   // ¿se muestran las cajas de colisión? (tecla H)
 
   function init(cv) {
     canvas = cv;
@@ -53,7 +54,9 @@
     for (const n of ['up', 'down', 'left', 'right']) d += r.doors[n] ? '1' : '0';
     let l = '';
     for (const n of ['up', 'down', 'left', 'right']) l += (r.locks && r.locks[n]) ? '1' : '0';
-    return view.floorNum + '|' + r.key + '|' + d + '|' + (r.cleared ? 1 : 0) + '|' + r.type + '|' + l;
+    let bd = '';
+    for (const n of ['up', 'down', 'left', 'right']) bd += (r.bossDoor && r.bossDoor[n]) ? '1' : '0';
+    return view.floorNum + '|' + r.key + '|' + d + '|' + (r.cleared ? 1 : 0) + '|' + r.type + '|' + l + '|' + bd;
   }
 
   function buildRoomCanvas(view) {
@@ -168,6 +171,55 @@
     return cv;
   }
 
+  // Marco propio de la PUERTA que lleva a la sala del jefe: filo rojo, pinchos
+  // y una calavera. Se dibuja encima del vano (abierto o cerrado) para que se
+  // reconozca a distancia.
+  function drawBossDoorFrame(g, d, dir) {
+    const rx = d.x - d.w / 2, ry = d.y - d.h / 2;
+    const horiz = d.horiz;
+    g.save();
+    g.lineJoin = 'round';
+
+    // banda roja alrededor del vano
+    g.strokeStyle = '#3a0d14';
+    g.lineWidth = 8;
+    g.strokeRect(rx + 2, ry + 2, d.w - 4, d.h - 4);
+    g.strokeStyle = '#d6394f';
+    g.lineWidth = 2.5;
+    g.strokeRect(rx + 1, ry + 1, d.w - 2, d.h - 2);
+
+    // pinchos en los bordes largos del vano
+    g.fillStyle = '#e0503f';
+    const n = 4;
+    for (let i = 0; i < n; i++) {
+      const t = (i + 1) / (n + 1);
+      const px = rx + (horiz ? d.w * t : 0);
+      const py = ry + (horiz ? 0 : d.h * t);
+      const s = 6;
+      g.beginPath();
+      if (horiz) { g.moveTo(px - s, ry + 1); g.lineTo(px, ry + 1 + s); g.lineTo(px + s, ry + 1); }
+      else { g.moveTo(rx + 1, py - s); g.lineTo(rx + 1 + s, py); g.lineTo(rx + 1, py + s); }
+      g.closePath(); g.fill();
+      g.beginPath();
+      if (horiz) { g.moveTo(px - s, ry + d.h - 1); g.lineTo(px, ry + d.h - 1 - s); g.lineTo(px + s, ry + d.h - 1); }
+      else { g.moveTo(rx + d.w - 1, py - s); g.lineTo(rx + d.w - 1 - s, py); g.lineTo(rx + d.w - 1, py + s); }
+      g.closePath(); g.fill();
+    }
+
+    // calavera en el centro del vano
+    const cxs = d.x, cys = d.y;
+    g.fillStyle = '#f0ead8';
+    circle(g, cxs, cys, 7); g.fill();
+    g.fillStyle = '#241018';
+    circle(g, cxs - 2.4, cys - 1.5, 1.7); g.fill();
+    circle(g, cxs + 2.4, cys - 1.5, 1.7); g.fill();
+    g.fillRect(cxs - 3.5, cys + 2.5, 7, 2.2);
+    g.strokeStyle = '#d6394f';
+    g.lineWidth = 1.5;
+    circle(g, cxs, cys, 9); g.stroke();
+    g.restore();
+  }
+
   function doorGeometry(dir) {
     switch (dir) {
       case 'up':    return { x: C.CX, y: C.ROOM_Y, w: C.DOOR_HALF * 2, h: C.WALL, horiz: true };
@@ -180,6 +232,7 @@
   function drawDoor(g, r, dir, open) {
     if (!r.doors[dir]) return;
     const locked = !!(r.locks && r.locks[dir]);
+    const isBossDoor = !!(r.bossDoor && r.bossDoor[dir]);
     const d = doorGeometry(dir);
     const rx = d.x - d.w / 2, ry = d.y - d.h / 2;
 
@@ -225,6 +278,9 @@
         g.stroke();
       }
     }
+
+    // la puerta que lleva al jefe lleva su propio marco
+    if (isBossDoor) drawBossDoorFrame(g, d, dir);
   }
 
   function drawObstacle(g, o) {
@@ -493,6 +549,75 @@
     ctx.restore();
   }
 
+  // Aviso de ataque del jefe: un indicador claro para poder esquivarlo.
+  // Ningún jefe ataca sin haber mostrado antes uno de estos.
+  function drawTelegraph(e) {
+    if (!(e.warnT > 0) || !e.warnKind) return;
+    const max = e.warnMax > 0 ? e.warnMax : 1;
+    const p = clamp(1 - e.warnT / max, 0, 1);   // 0 → 1 conforme se acerca el golpe
+    const ang = e.warnAngle || 0;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+
+    if (e.warnKind === 'line') {
+      const len = 780;
+      ctx.translate(e.x, e.y);
+      ctx.rotate(ang);
+      const lg = ctx.createLinearGradient(0, 0, len, 0);
+      lg.addColorStop(0, 'rgba(255,120,90,' + (0.5 + 0.4 * p) + ')');
+      lg.addColorStop(1, 'rgba(255,60,60,0)');
+      ctx.fillStyle = lg;
+      ctx.fillRect(0, -14, len, 28);
+      ctx.fillStyle = 'rgba(255,240,210,' + (0.5 + 0.45 * p) + ')';
+      ctx.fillRect(0, -3, len, 6);
+    } else if (e.warnKind === 'fan') {
+      const reach = 230 + 130 * p;
+      const half = 0.5;
+      ctx.beginPath();
+      ctx.moveTo(e.x, e.y);
+      ctx.arc(e.x, e.y, reach, ang - half, ang + half);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(255,190,110,' + (0.16 + 0.22 * p) + ')';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,230,170,' + (0.4 + 0.4 * p) + ')';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(e.x, e.y);
+      ctx.arc(e.x, e.y, reach, ang - half, ang + half);
+      ctx.closePath();
+      ctx.stroke();
+    } else if (e.warnKind === 'land') {
+      const rr = 42 + 62 * p;
+      ctx.strokeStyle = 'rgba(150,255,170,0.65)';
+      ctx.lineWidth = 3;
+      circle(ctx, e.x, e.y, rr); ctx.stroke();
+      ctx.strokeStyle = 'rgba(120,240,150,.5)';
+      circle(ctx, e.x, e.y, rr * 0.55); ctx.stroke();
+    } else if (e.warnKind === 'summon') {
+      const rr = e.r + 10 + 22 * p;
+      ctx.strokeStyle = 'rgba(255,210,90,' + (0.5 + 0.4 * (1 - p)) + ')';
+      ctx.lineWidth = 4;
+      circle(ctx, e.x, e.y, rr); ctx.stroke();
+    } else if (e.warnKind === 'tele') {
+      ctx.strokeStyle = 'rgba(160,210,255,' + (0.4 + 0.5 * p) + ')';
+      ctx.lineWidth = 3;
+      circle(ctx, e.x, e.y, e.r + 6 + 30 * (1 - p)); ctx.stroke();
+    } else if (e.warnKind === 'spiral') {
+      ctx.strokeStyle = 'rgba(200,150,255,' + (0.4 + 0.5 * p) + ')';
+      ctx.lineWidth = 3;
+      circle(ctx, e.x, e.y, e.r + 4 + 18 * p); ctx.stroke();
+    } else { // 'ring' | 'slam'
+      const base = e.r + 6;
+      const grow = 34 * p;
+      ctx.strokeStyle = 'rgba(255,90,120,' + (0.5 + 0.4 * (1 - p)) + ')';
+      ctx.lineWidth = 3;
+      circle(ctx, e.x, e.y, base + grow); ctx.stroke();
+      ctx.lineWidth = 1.5;
+      circle(ctx, e.x, e.y, base + grow * 0.5); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   function drawEnemy(e, view) {
     if (!isFinite(e.x) || !isFinite(e.y)) return;
     const t = e.type;
@@ -505,6 +630,8 @@
       circle(ctx, e.x, e.y, e.r * 1.7); ctx.fill();
       ctx.restore();
     }
+    // Aviso de ataque (telegrafiado): se dibuja BAJO el cuerpo del jefe.
+    if (e.warnT > 0) drawTelegraph(e);
     ctx.save();
     if (e.spawnT > 0) ctx.globalAlpha = Math.max(0.05, 1 - e.spawnT / 0.65);
     if (e.flash > 0) { ctx.globalAlpha = 1; }
@@ -841,6 +968,75 @@
     circle(ctx, b.x, b.y, b.r);
     ctx.fill();
     ctx.restore();
+  }
+
+  // Hitboxes: cuando hay enemigos o proyectiles cerca, se marca su caja de
+  // colisión real. La del jugador local va sobre su torso y se muestra siempre
+  // que está activada (se activa y desactiva con la tecla H).
+  function drawHitboxes(view) {
+    if (!showHitboxes) return;
+    const me = view.players.find((p) => p.id === view.localId) || view.players[0];
+    if (!me || me.dead) return;
+    const NEAR = 155;
+    const pulse = 0.72 + Math.sin(Utils.now() * 6) * 0.28;
+    const dash = (on) => { if (ctx.setLineDash) ctx.setLineDash(on ? [4, 3] : []); };
+    ctx.save();
+    ctx.lineJoin = 'round';
+
+    // hitbox del jugador: un circulito RELLENO sobre el torso, brillante y
+    // palpitante (no un aro vacío).
+    const hy = me.y + C.PLAYER_HURT_DY;
+    ctx.save();
+    ctx.shadowColor = '#7fe3ff';
+    ctx.shadowBlur = 18 * pulse;
+    // relleno translúcido con degradado (efecto "cristal" brillante)
+    const pg = ctx.createRadialGradient(me.x, hy, 0, me.x, hy, me.r);
+    pg.addColorStop(0, 'rgba(255,255,255,0.95)');
+    pg.addColorStop(0.5, 'rgba(150,235,255,0.85)');
+    pg.addColorStop(1, 'rgba(90,200,255,0.55)');
+    ctx.globalAlpha = 0.72 + 0.24 * pulse;
+    ctx.fillStyle = pg;
+    circle(ctx, me.x, hy, me.r); ctx.fill();
+    // contorno fino y nítido
+    ctx.globalAlpha = 0.95;
+    ctx.strokeStyle = '#eaffff';
+    ctx.lineWidth = 1.6;
+    circle(ctx, me.x, hy, me.r + 0.6); ctx.stroke();
+    ctx.restore();
+
+    // enemigos cercanos
+    for (const e of view.enemies) {
+      if (!isFinite(e.x) || !isFinite(e.y)) continue;
+      const d = Math.hypot(e.x - me.x, e.y - hy);
+      if (d > NEAR + e.r) continue;
+      const a = clamp(1 - (d - NEAR * 0.55) / (NEAR * 0.55), 0.35, 1);
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.shadowColor = e.isBoss ? '#ff4d6d' : '#ffb347';
+      ctx.shadowBlur = (e.isBoss ? 14 : 9) * pulse;
+      ctx.strokeStyle = e.isBoss ? '#ff6b86' : '#ffd08a';
+      ctx.lineWidth = e.isBoss ? 2.4 : 1.6;
+      circle(ctx, e.x, e.y, e.r); ctx.stroke();
+      ctx.restore();
+    }
+
+    // proyectiles cercanos
+    for (const b of view.bullets) {
+      if (!isFinite(b.x) || !isFinite(b.y)) continue;
+      const d = Math.hypot(b.x - me.x, b.y - hy);
+      if (d > NEAR) continue;
+      ctx.save();
+      ctx.globalAlpha = 0.85;
+      ctx.shadowColor = b.friendly ? '#8fe0d0' : '#ff6b8a';
+      ctx.shadowBlur = 8 * pulse;
+      ctx.strokeStyle = b.friendly ? '#c7fff2' : '#ffd0da';
+      ctx.lineWidth = 1.3;
+      circle(ctx, b.x, b.y, b.r); ctx.stroke();
+      ctx.restore();
+    }
+
+    ctx.restore();
+    dash(false);
   }
 
   // Contador de "sellado" que se dibuja encima del botín recién aparecido.
@@ -1853,6 +2049,8 @@
     for (const p of view.players) drawPlayer(p, view, p.id === view.localId);
     // balas
     for (const b of view.bullets) drawBullet(b);
+    // hitboxes (solo cerca del jugador local)
+    drawHitboxes(view);
     // partículas
     ctx.save();
     for (const pt of view.particles) {
@@ -1897,5 +2095,9 @@
     }
   }
 
-  global.Render = { init, frame, drawItemIcon, shade };
+  function setHitboxes(on) { showHitboxes = !!on; return showHitboxes; }
+  function toggleHitboxes() { showHitboxes = !showHitboxes; return showHitboxes; }
+  function hitboxesOn() { return showHitboxes; }
+
+  global.Render = { init, frame, drawItemIcon, shade, setHitboxes, toggleHitboxes, hitboxesOn };
 })(typeof window !== 'undefined' ? window : globalThis);

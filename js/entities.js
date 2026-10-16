@@ -720,7 +720,7 @@
 
       x: opts.x != null ? opts.x : C.CX,
       y: opts.y != null ? opts.y : C.CY,
-      r: 12,
+      r: 6,    // hitbox pequeña (en el torso): esquiva justa en un juego difícil
       vx: 0, vy: 0,
       aim: { x: 0, y: 1 },
       face: { x: 0, y: 1 },
@@ -876,16 +876,17 @@
     ['boss3', 'boss4', 'boss6'],
     ['boss4', 'boss5', 'boss7'],
     ['boss5', 'boss6', 'boss8'],
-    ['boss6', 'boss7', 'boss1'],
+    ['boss6', 'boss7', 'boss'],
     ['boss7', 'boss8', 'boss2'],
-    ['boss8', 'boss1', 'boss3'],
-    ['boss1', 'boss2', 'boss3', 'boss4', 'boss5', 'boss6', 'boss7', 'boss8'],
+    ['boss8', 'boss', 'boss3'],
+    ['boss', 'boss2', 'boss3', 'boss4', 'boss5', 'boss6', 'boss7', 'boss8'],
   ];
 
   // Vida objetivo de un jefe según el piso (progresión clara de dificultad).
+  // Los jefes son el reto principal: ahora son más duros y suben más rápido.
   function bossTargetHp(floorNum) {
     const f = Math.max(1, floorNum | 0);
-    return 150 * (1 + (f - 1) * 0.55);
+    return 175 * (1 + (f - 1) * 0.66);
   }
 
   function createEnemy(type, x, y, floorNum) {
@@ -897,8 +898,8 @@
       // rotación sólo añade un pequeño matiz, nunca rompe la progresión.
       const idx = Math.max(0, BOSS_ROSTER.indexOf(type));
       hp = Math.round(bossTargetHp(f) * (1 + idx * 0.04));
-      spMul = 1 + (f - 1) * 0.045;
-      shotMul = 1 + (f - 1) * 0.03;
+      spMul = 1 + (f - 1) * 0.06;
+      shotMul = 1 + (f - 1) * 0.05;
     } else {
       hp = Math.round(t.hp * (1 + (f - 1) * 0.55));
       spMul = 1 + (f - 1) * 0.07;
@@ -912,7 +913,7 @@
       hp,
       maxHp: hp,
       speed: t.speed * spMul,
-      dmg: t.dmg,
+      dmg: t.isBoss ? (t.dmg + (f >= 7 ? 1 : 0)) : t.dmg,
       ai: t.ai,
       color: t.color,
       wobble: !!t.wobble,
@@ -921,6 +922,9 @@
       splits: t.splits || 0,
       shotRate: t.shotRate || 0,
       shotSpeed: t.shotSpeed ? t.shotSpeed * shotMul : 0,
+      // jefes: más agresivos y letales según el piso
+      bossDmg: t.isBoss ? (t.dmg + (f >= 7 ? 1 : 0)) : 0,
+      rateMul: t.isBoss ? (1 + (f - 1) * 0.035) : 1,
       keepDist: t.keepDist || 0,
       shootRange: t.shootRange || 0,
       shotCd: 0.6 + Math.random() * 0.9,
@@ -942,6 +946,15 @@
       bossTele: 0,
       bossAir: false,
       sumCd: 2.5,
+      // Telegrafiado: el jefe AVISA antes de atacar (nunca ataca por sorpresa).
+      warnT: 0,          // segundos que quedan de aviso
+      warnMax: 0,        // duración total del aviso (para la animación)
+      warnKind: '',      // 'ring' | 'line' | 'fan' | 'slam' | 'land' | 'tele' | 'summon' | 'spiral'
+      warnAngle: 0,      // dirección congelada del aviso (líneas/abanicos)
+      warnCd: 0.7 + Math.random() * 0.9,
+      hasWarned: false, // ¿ya ha avisado alguna vez? (no dispara antes del 1er aviso)
+      dashT: 0,          // embestida en curso (cargador)
+      spiralT: 0,        // ráfaga en espiral en curso
       isBoss: !!t.isBoss,
       bossStyle: t.bossStyle || null,
       look: t.look || null,

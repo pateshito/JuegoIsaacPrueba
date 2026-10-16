@@ -10,6 +10,8 @@
   let attached = false;
 
   // Esquemas: cada jugador local tiene su propio mapa de teclas.
+  // p2 ya no se usa en la partida (el cooperativo local se retiró); se conserva
+  // para las pruebas automáticas de 2 jugadores locales.
   const SCHEMES = {
     p1: {
       up: 'KeyW', down: 'KeyS', left: 'KeyA', right: 'KeyD',

@@ -101,7 +101,7 @@
       ui.tbRoom.style.display = '';
     } else {
       ui.tbRoom.dataset.code = '';
-      ui.tbRoom.textContent = view.mode === 'local' && view.players.length > 1 ? 'Coop local' : 'Un jugador';
+      ui.tbRoom.textContent = view.players.length > 1 ? (view.players.length + ' jugadores') : 'Un jugador';
       ui.tbRoom.style.display = '';
     }
     if (view.mode === 'client' || view.mode === 'host') {
@@ -483,27 +483,6 @@
     setScene('playing');
   }
 
-  function playCoop() {
-    Sfx.unlock();
-    roomCode = '';
-    Game.setHandlers({ onEnd: onGameEnd, onPing: null });
-    const ch = CH();
-    const owned = ch ? ch.LIST.filter((c) => !MT() || MT().isUnlocked(c.id)) : [];
-    const p2 = owned.find((c) => c.id !== playerChar) || null;
-    Game.start({
-      mode: 'local',
-      localPlayers: [
-        { id: 'p0', name: myName('Isaac'), skin: playerSkin, char: playerChar, slot: 0, scheme: 'p1' },
-        {
-          id: 'p1', name: p2 ? p2.name : 'Magdalena',
-          skin: p2 ? p2.skin : Entities.normSkin(playerSkin + 3),
-          char: p2 ? p2.id : undefined, slot: 1, scheme: 'p2',
-        },
-      ],
-    });
-    setScene('playing');
-  }
-
   // ---------------------------------------------------------
   // Anfitrión online
   // ---------------------------------------------------------
@@ -794,7 +773,7 @@
     runRewarded = false;
     const mode = Game.G.mode;
     if (mode === 'local') {
-      if (Game.G.players.length > 1) playCoop(); else playSolo();
+      playSolo();
     } else if (mode === 'host') {
       Game.stop();
       startHostRun();
@@ -861,8 +840,16 @@
 
     pollAchievements();
     if (Input.consume('KeyM')) toggleMute();
+    if (Input.consume('KeyH')) toggleHitboxes();
     if (Input.consume('Escape')) togglePause();
     Input.endFrame();
+  }
+
+  function toggleHitboxes() {
+    if (typeof Render.toggleHitboxes !== 'function') return;
+    const on = Render.toggleHitboxes();
+    Sfx.play('ui');
+    if (scene === 'playing') toast(on ? 'Hitboxes: activadas' : 'Hitboxes: desactivadas', 1200);
   }
 
   function togglePause() {
@@ -888,7 +875,6 @@
     Sfx.play('ui');
     switch (action) {
       case 'solo': playSolo(); break;
-      case 'coop': playCoop(); break;
       case 'host': startHosting(); break;
       case 'join':
         ui.joinStatus.textContent = '';

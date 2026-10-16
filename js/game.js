@@ -1063,7 +1063,7 @@
       for (let i = room.pickups.length - 1; i >= 0; i--) {
         const k = room.pickups[i];
         if (k.lock > 0) continue;   // aún sellado tras aparecer
-        if (Utils.dist(p.x, p.y, k.x, k.y) > p.r + k.r + 4) continue;
+        if (Utils.dist(p.x, p.y, k.x, k.y) > p.r + k.r + 9) continue;   // +margen: la hitbox es pequeña
         if (k.type === 'trapdoor') {
           room.pickups.splice(i, 1);
           nextFloor();
@@ -1097,7 +1097,7 @@
         const ped = room.pedestals[i];
         if (ped.taken) continue;
         if (ped.lock > 0) continue;   // aún sellado tras aparecer
-        if (Utils.dist(p.x, p.y, ped.x, ped.y) > p.r + 24) continue;
+        if (Utils.dist(p.x, p.y, ped.x, ped.y) > p.r + 28) continue;
         if (ped.price > 0) {
           if (G.coins >= ped.price) {
             spendCoins(ped.price);
@@ -1307,7 +1307,13 @@
       G.bullets.push(E.createBullet(
         e.x + Math.cos(a) * e.r, e.y + Math.sin(a) * e.r,
         Math.cos(a) * speed, Math.sin(a) * speed,
-        { friendly: false, dmg: 1, r: 5, color: opt.color || '#ff7a9c', life: 2.6, bounce: opt.bounce || 0 }
+        {
+          friendly: false, dmg: e.bossDmg || 1,
+          r: opt.r != null ? opt.r : 5,
+          color: opt.color || '#ff7a9c',
+          life: opt.life != null ? opt.life : 2.6,
+          bounce: opt.bounce || 0,
+        }
       ));
     }
     addShake(0.12);
@@ -1321,7 +1327,7 @@
       G.bullets.push(E.createBullet(
         e.x + Math.cos(aa) * e.r, e.y + Math.sin(aa) * e.r,
         Math.cos(aa) * speed, Math.sin(aa) * speed,
-        { friendly: false, dmg: 1, r: 5, color: opt.color || '#ff9a5c', life: 2.4, bounce: opt.bounce || 0 }
+        { friendly: false, dmg: e.bossDmg || 1, r: 5, color: opt.color || '#ff9a5c', life: 2.4, bounce: opt.bounce || 0 }
       ));
     }
   }
@@ -1334,149 +1340,267 @@
       G.bullets.push(E.createBullet(
         e.x + Math.cos(a) * e.r, e.y + Math.sin(a) * e.r,
         Math.cos(a) * e.shotSpeed, Math.sin(a) * e.shotSpeed,
-        { friendly: false, dmg: 1, r: 5, color: color || '#c99cff', life: 2.6 }
+        { friendly: false, dmg: e.bossDmg || 1, r: 5, color: color || '#c99cff', life: 2.6 }
       ));
     }
   }
 
-  // ---------- Patrones de jefe ----------
-  // 1) Monstruo: ráfagas radiales + abanico apuntado.
+  // Cadencia de jefe: los jefes de pisos profundos atacan más seguido.
+  function bcd(e, base) { return base / (e.rateMul || 1); }
+
+  // ---------- Telegrafiado ----------
+  // Ningún jefe ataca por sorpresa: antes de cada ataque importante se queda
+  // quieto "cargando" y muestra un aviso (aro, línea de mira, abanico, etc.).
+  function bossWarn(e, kind, dur, angle) {
+    e.warnT = dur;
+    e.warnMax = dur;
+    e.warnKind = kind;
+    e.warnAngle = angle || 0;
+    e.hasWarned = true;   // a partir de aquí ya puede hacer sus disparos de apoyo
+    Sfx.play('hit');
+  }
+
+  // ---------- Patrones de jefe (todos con aviso previo) ----------
+  // 1) Monstruo: se hincha (aviso) y suelta anillos expansivos + abanico.
   function bossBurst(e, dt, target, d, enraged) {
-    if (e.bossBurst > 0) {
-      e.bossBurst -= dt;
-      e.bossShootCd = (e.bossShootCd || 0) - dt;
-      if (e.bossShootCd <= 0) {
-        e.bossShootCd = 0.17;
-        bossShootRing(e, enraged ? 9 : 6, e.shotSpeed, { color: '#ff7a9c', off: e.anim * 1.4 });
+    if (e.warnT > 0) {
+      e.warnT -= dt;
+      moveEntity(e, e.dir.x * e.speed * 0.12 * dt, e.dir.y * e.speed * 0.12 * dt);
+      if (e.warnT <= 0) {
+        const rings = enraged ? 3 : 2;
+        for (let r = 0; r < rings; r++) {
+          bossShootRing(e, (enraged ? 22 : 16) + r * 4, e.shotSpeed * (0.9 + r * 0.12),
+            { color: '#ff7a9c', off: e.bossSpin + r * 0.3 });
+        }
+        bossAim(e, target, enraged ? 9 : 6, 0.16, e.shotSpeed * 1.05, { color: '#ffd0e0' });
+        e.bossSpin += 0.7;
+        addShake(0.22);
+        e.warnCd = bcd(e, enraged ? 1.7 : 2.5);
       }
-      moveEntity(e, e.dir.x * e.speed * 0.3 * dt, e.dir.y * e.speed * 0.3 * dt);
-      if (e.bossBurst <= 0) e.bossTimer = enraged ? 1.9 : 2.8;
-    } else if (e.bossTimer <= 0) {
-      e.bossBurst = 0.85;
-      e.bossShootCd = 0;
-      Sfx.play('hit');
-    } else {
-      e.bossTimer -= dt;
-      moveEntity(e, e.dir.x * e.speed * dt, e.dir.y * e.speed * dt);
-      e.shotCd -= dt;
-      if (e.shotCd <= 0 && d < 520) { e.shotCd = enraged ? 1.6 : 2.4; bossAim(e, target, 3, 0.28, e.shotSpeed); }
+      return;
     }
+    moveEntity(e, e.dir.x * e.speed * dt, e.dir.y * e.speed * dt);
+    e.warnCd -= dt;
+    if (e.warnCd <= 0) bossWarn(e, 'ring', 0.6, 0);
   }
 
-  // 2) Cargador: embiste en línea y suelta un anillo al frenar.
+  // 2) Cargador: PRIMERO avisa con una línea de mira larga (sin sorpresas) y
+  //    solo entonces embiste en línea recta. Al frenar suelta un anillo.
   function bossCharge(e, dt, target, d, enraged) {
-    if (e.chargeT > 0) {
-      e.chargeT -= dt;
-      moveEntity(e, e.dir.x * e.speed * 2.2 * dt, e.dir.y * e.speed * 2.2 * dt);
-      if (e.chargeT <= 0) bossShootRing(e, enraged ? 8 : 6, e.shotSpeed * 0.9, { color: '#ffcc66' });
-    } else {
-      e.chargeCd -= dt;
-      if (e.chargeCd <= 0 && d < 480) { e.chargeT = 0.45; e.chargeCd = enraged ? 1.5 : 2.4; Sfx.play('hit'); }
-      else moveEntity(e, e.dir.x * e.speed * 0.3 * dt, e.dir.y * e.speed * 0.3 * dt);
-      e.shotCd -= dt;
-      if (e.shotCd <= 0 && d < 460) { e.shotCd = enraged ? 1.8 : 2.8; bossAim(e, target, 3, 0.24, e.shotSpeed * 0.8, { color: '#ffd166' }); }
+    if (e.warnT > 0) {
+      // Mantiene la mira durante la primera parte del aviso; luego la fija.
+      if (e.warnT > e.warnMax * 0.4) {
+        e.warnAngle = Math.atan2(target.y - e.y, target.x - e.x);
+      }
+      e.warnT -= dt;
+      if (e.warnT <= 0) {
+        e.dir.x = Math.cos(e.warnAngle);
+        e.dir.y = Math.sin(e.warnAngle);
+        e.dashT = enraged ? 0.62 : 0.52;
+        addShake(0.25);
+      }
+      return;
+    }
+    if (e.dashT > 0) {
+      e.dashT -= dt;
+      moveEntity(e, e.dir.x * e.speed * 2.6 * dt, e.dir.y * e.speed * 2.6 * dt);
+      if (e.dashT <= 0) {
+        bossShootRing(e, enraged ? 20 : 14, e.shotSpeed, { color: '#ffca6a' });
+        e.warnCd = bcd(e, enraged ? 1.3 : 2.0);
+      }
+      return;
+    }
+    moveEntity(e, e.dir.x * e.speed * 0.35 * dt, e.dir.y * e.speed * 0.35 * dt);
+    e.shotCd -= dt;
+    if (e.hasWarned && e.shotCd <= 0 && d < 520) {
+      e.shotCd = bcd(e, enraged ? 1.5 : 2.2);
+      bossAim(e, target, enraged ? 7 : 5, 0.2, e.shotSpeed * 0.9, { color: '#ffd27a' });
+    }
+    e.warnCd -= dt;
+    if (e.warnCd <= 0 && d < 560 && d > 70) {
+      bossWarn(e, 'line', enraged ? 0.7 : 0.9, Math.atan2(target.y - e.y, target.x - e.x));
     }
   }
 
-  // 3) Devorador: chorro continuo en espiral de balas lentas.
+  // 3) Devorador: avisa y gira soltando varias espirales de MUCHAS balas.
   function bossSpiral(e, dt, target, d, enraged) {
-    e.bossShootCd = (e.bossShootCd || 0) - dt;
-    if (e.bossShootCd <= 0) { e.bossShootCd = enraged ? 0.085 : 0.12; bossSpiralShot(e, enraged, '#c99cff'); }
+    if (e.warnT > 0) {
+      e.warnT -= dt;
+      moveEntity(e, e.dir.x * e.speed * 0.4 * dt, e.dir.y * e.speed * 0.4 * dt);
+      if (e.warnT <= 0) e.spiralT = enraged ? 3.2 : 2.4;
+      return;
+    }
+    if (e.spiralT > 0) {
+      e.spiralT -= dt;
+      e.bossShootCd -= dt;
+      const arms = enraged ? 6 : 4;
+      if (e.bossShootCd <= 0) {
+        e.bossShootCd = bcd(e, 0.1);
+        e.bossSpin = (e.bossSpin || 0) + 0.24;
+        for (let k = 0; k < arms; k++) {
+          const a = e.bossSpin + (k * Math.PI * 2) / arms;
+          G.bullets.push(E.createBullet(
+            e.x + Math.cos(a) * e.r, e.y + Math.sin(a) * e.r,
+            Math.cos(a) * e.shotSpeed * 0.8, Math.sin(a) * e.shotSpeed * 0.8,
+            { friendly: false, dmg: e.bossDmg || 1, r: 5, color: '#c99cff', life: 2.6 }
+          ));
+        }
+      }
+      moveEntity(e, e.dir.x * e.speed * 0.4 * dt, e.dir.y * e.speed * 0.4 * dt);
+      if (e.spiralT <= 0) e.warnCd = bcd(e, enraged ? 1.2 : 1.8);
+      return;
+    }
     const want = 200;
     const push = d > want + 30 ? 1 : (d < want - 30 ? -1 : 0);
     moveEntity(e, e.dir.x * push * e.speed * 1.4 * dt, e.dir.y * push * e.speed * 1.4 * dt);
+    e.warnCd -= dt;
+    if (e.warnCd <= 0) bossWarn(e, 'spiral', 0.5, 0);
   }
 
-  // 4) Espectro: se teletransporta y dispara en abanico apuntado.
+  // 4) Espectro: avisa (se difumina), desaparece, reaparece en otro punto y
+  //    estalla en anillos + abanico apuntado.
   function bossTeleport(e, dt, target, d, enraged) {
-    e.bossTele = (e.bossTele || 0) - dt;
-    e.shotCd -= dt;
-    if (e.bossTele <= 0) {
-      e.bossTele = enraged ? 2.1 : 3.1;
-      const pad = 92;
-      e.x = C.INNER_L + pad + Math.random() * (C.INNER_R - C.INNER_L - pad * 2);
-      e.y = C.INNER_T + pad + Math.random() * (C.INNER_B - C.INNER_T - pad * 2);
-      G.fxQueue.push({ k: 'boom', x: e.x, y: e.y, c: '#9fd0e6', n: 16 });
-      bossShootRing(e, enraged ? 10 : 7, e.shotSpeed * 0.85, { color: '#9fd0e6', off: Math.random() * 2 });
-    } else {
-      moveEntity(e, e.dir.x * e.speed * 0.5 * dt, e.dir.y * e.speed * 0.5 * dt);
-      if (e.shotCd <= 0 && d < 420) { e.shotCd = enraged ? 1.2 : 1.9; bossAim(e, target, enraged ? 5 : 3, 0.2, e.shotSpeed, { color: '#bfe3ff' }); }
-    }
-  }
-
-  // 5) Baboso: grandes saltos; al aterrizar suelta un anillo.
-  function bossHop(e, dt, target, d, enraged) {
-    e.hopCd -= dt;
-    if (e.hopCd <= 0) {
-      if (e.bossAir) {
-        e.bossAir = false;
-        e.hopCd = enraged ? 1.1 : 1.7;
-        bossShootRing(e, enraged ? 12 : 8, e.shotSpeed * 0.75, { color: '#8ee6a0' });
-        addShake(0.3);
-        G.fxQueue.push({ k: 'boom', x: e.x, y: e.y, c: '#7fd18a', n: 14 });
-      } else {
-        const a = Math.atan2(target.y - e.y, target.x - e.x) + (Math.random() - 0.5) * 0.25;
-        e.hopV.x = Math.cos(a) * e.speed * 3.0;
-        e.hopV.y = Math.sin(a) * e.speed * 3.0;
-        e.bossAir = true;
-        e.hopCd = 0.55;
+    if (e.warnT > 0) {
+      e.warnT -= dt;
+      moveEntity(e, e.dir.x * e.speed * 0.3 * dt, e.dir.y * e.speed * 0.3 * dt);
+      if (e.warnT <= 0) {
+        const pad = 92;
+        e.x = C.INNER_L + pad + Math.random() * (C.INNER_R - C.INNER_L - pad * 2);
+        e.y = C.INNER_T + pad + Math.random() * (C.INNER_B - C.INNER_T - pad * 2);
+        G.fxQueue.push({ k: 'boom', x: e.x, y: e.y, c: '#9fd0e6', n: 20 });
+        bossShootRing(e, enraged ? 24 : 16, e.shotSpeed * 0.85, { color: '#9fd0e6', off: Math.random() * 2 });
+        bossAim(e, target, enraged ? 9 : 6, 0.16, e.shotSpeed, { color: '#bfe3ff' });
+        e.warnCd = bcd(e, enraged ? 1.9 : 2.8);
       }
-    } else {
-      moveEntity(e, e.hopV.x * dt, e.hopV.y * dt);
-      const damp = Math.pow(0.05, dt);
-      e.hopV.x *= damp; e.hopV.y *= damp;
+      return;
     }
+    moveEntity(e, e.dir.x * e.speed * 0.5 * dt, e.dir.y * e.speed * 0.5 * dt);
     e.shotCd -= dt;
-    if (e.shotCd <= 0 && d < 460) { e.shotCd = enraged ? 1.6 : 2.4; bossAim(e, target, 3, 0.22, e.shotSpeed * 0.7, { color: '#b0f0c0' }); }
+    if (e.hasWarned && e.shotCd <= 0 && d < 480) {
+      e.shotCd = bcd(e, enraged ? 1.1 : 1.7);
+      bossAim(e, target, enraged ? 7 : 5, 0.18, e.shotSpeed, { color: '#bfe3ff' });
+    }
+    e.warnCd -= dt;
+    if (e.warnCd <= 0) bossWarn(e, 'tele', 0.55, 0);
   }
 
-  // 6) Serafín: vuela y deja bombas de plumas que estallan en anillo.
-  function bossFeather(e, dt, target, d, enraged) {
+  // 5) Baboso: se agacha (aviso), salta hacia el jugador y al caer revienta en
+  //    dos anillos. Mientras vuela se ve un marcador de aterrizaje.
+  function bossHop(e, dt, target, d, enraged) {
+    if (e.warnT > 0) {
+      if (e.warnKind === 'land') {
+        moveEntity(e, e.hopV.x * dt, e.hopV.y * dt);
+        const damp = Math.pow(0.06, dt);
+        e.hopV.x *= damp; e.hopV.y *= damp;
+        e.warnT -= dt;
+        if (e.warnT <= 0) {
+          bossShootRing(e, enraged ? 24 : 16, e.shotSpeed, { color: '#b0f0c0' });
+          bossShootRing(e, enraged ? 16 : 10, e.shotSpeed * 0.6, { color: '#7fd18a', off: 0.2 });
+          addShake(0.3);
+          G.fxQueue.push({ k: 'boom', x: e.x, y: e.y, c: '#7fd18a', n: 16 });
+          e.warnCd = bcd(e, enraged ? 1.4 : 2.1);
+        }
+      } else { // 'slam': se agacha antes de saltar
+        moveEntity(e, e.dir.x * e.speed * 0.1 * dt, e.dir.y * e.speed * 0.1 * dt);
+        e.warnT -= dt;
+        if (e.warnT <= 0) {
+          const a = Math.atan2(target.y - e.y, target.x - e.x);
+          e.hopV.x = Math.cos(a) * e.speed * 2.6;
+          e.hopV.y = Math.sin(a) * e.speed * 2.6;
+          e.warnKind = 'land'; e.warnMax = 0.45; e.warnT = 0.45;
+        }
+      }
+      return;
+    }
+    moveEntity(e, e.dir.x * e.speed * 0.4 * dt, e.dir.y * e.speed * 0.4 * dt);
     e.shotCd -= dt;
-    const want = 170;
+    if (e.hasWarned && e.shotCd <= 0 && d < 460) {
+      e.shotCd = bcd(e, enraged ? 1.5 : 2.2);
+      bossAim(e, target, enraged ? 5 : 3, 0.22, e.shotSpeed * 0.8, { color: '#b0f0c0' });
+    }
+    e.warnCd -= dt;
+    if (e.warnCd <= 0) bossWarn(e, 'slam', 0.55, 0);
+  }
+
+  // 6) Serafín: avisa abriendo las alas y lanza un abanico ancho de plumas
+  //    explosivas (cada una estalla en un anillo de balas).
+  function bossFeather(e, dt, target, d, enraged) {
+    if (e.warnT > 0) {
+      e.warnAngle = Math.atan2(target.y - e.y, target.x - e.x);
+      e.warnT -= dt;
+      moveEntity(e, e.dir.x * e.speed * 0.2 * dt, e.dir.y * e.speed * 0.2 * dt);
+      if (e.warnT <= 0) {
+        const n = enraged ? 13 : 9;
+        for (let k = 0; k < n; k++) {
+          const a = e.warnAngle + (k - (n - 1) / 2) * 0.14;
+          G.bullets.push(E.createBullet(
+            e.x + Math.cos(a) * e.r, e.y + Math.sin(a) * e.r,
+            Math.cos(a) * e.shotSpeed * 0.9, Math.sin(a) * e.shotSpeed * 0.9,
+            { friendly: false, dmg: e.bossDmg || 1, r: 5, color: '#ffe3a8', life: 3.6, fuse: 1.4, ring: enraged ? 14 : 10 }
+          ));
+        }
+        e.warnCd = bcd(e, enraged ? 1.6 : 2.3);
+      }
+      return;
+    }
+    const want = 180;
     const push = d > want + 30 ? 1 : (d < want - 30 ? -1 : 0);
     moveEntity(e,
       e.dir.x * push * e.speed * dt + Math.cos(e.anim * 1.2) * e.speed * 0.35 * dt,
       e.dir.y * push * e.speed * dt + Math.sin(e.anim * 1.1) * e.speed * 0.35 * dt);
-    if (e.shotCd <= 0 && d < 520) {
-      e.shotCd = enraged ? 1.5 : 2.2;
-      const a0 = Math.atan2(target.y - e.y, target.x - e.x);
-      for (let k = -1; k <= 1; k++) {
-        const a = a0 + k * 0.35;
-        G.bullets.push(E.createBullet(
-          e.x + Math.cos(a) * e.r, e.y + Math.sin(a) * e.r,
-          Math.cos(a) * 90, Math.sin(a) * 90,
-          { friendly: false, dmg: 1, r: 6, color: '#ffe3a8', life: 3.4, fuse: 1.1, ring: enraged ? 10 : 7 }
-        ));
-      }
-    }
+    e.warnCd -= dt;
+    if (e.warnCd <= 0) bossWarn(e, 'fan', 0.55, Math.atan2(target.y - e.y, target.x - e.x));
   }
 
-  // 7) Cráneo: huesos que rebotan en las paredes.
+  // 7) Cráneo: avisa y dispara una andanada de huesos que rebotan + una cruz
+  //    de huesos en todas direcciones.
   function bossSkull(e, dt, target, d, enraged) {
-    e.shotCd -= dt;
+    if (e.warnT > 0) {
+      e.warnAngle = Math.atan2(target.y - e.y, target.x - e.x);
+      e.warnT -= dt;
+      moveEntity(e, e.dir.x * e.speed * 0.2 * dt, e.dir.y * e.speed * 0.2 * dt);
+      if (e.warnT <= 0) {
+        bossAim(e, target, enraged ? 11 : 7, 0.16, e.shotSpeed, { color: '#e8e4d8', bounce: 2 });
+        bossShootRing(e, enraged ? 18 : 12, e.shotSpeed * 0.85, { color: '#cfc7b0', bounce: 2, off: Math.random() * 2 });
+        e.warnCd = bcd(e, enraged ? 1.7 : 2.4);
+      }
+      return;
+    }
     const want = 220;
     const push = d > want + 40 ? 1 : (d < want - 40 ? -1 : 0);
     moveEntity(e, e.dir.x * push * e.speed * dt, e.dir.y * push * e.speed * dt);
-    if (e.shotCd <= 0 && d < 520) { e.shotCd = enraged ? 1.6 : 2.3; bossAim(e, target, enraged ? 5 : 3, 0.26, e.shotSpeed, { color: '#e8e4d8', bounce: 2 }); }
+    e.warnCd -= dt;
+    if (e.warnCd <= 0) bossWarn(e, 'fan', 0.5, Math.atan2(target.y - e.y, target.x - e.x));
   }
 
-  // 8) Colmena: espiral incesante + invoca moscas.
+  // 8) Colmena: avisa y revienta en espirales, además de invocar crías del piso.
   function bossSummon(e, dt, target, d, enraged) {
-    e.bossShootCd = (e.bossShootCd || 0) - dt;
-    if (e.bossShootCd <= 0) { e.bossShootCd = enraged ? 0.1 : 0.15; bossSpiralShot(e, enraged, '#ffd166'); }
-    e.sumCd = (e.sumCd || 0) - dt;
-    if (e.sumCd <= 0) {
-      e.sumCd = enraged ? 4 : 6;
-      const n = enraged ? 3 : 2;
-      for (let i = 0; i < n; i++) {
-        const a = Math.random() * Math.PI * 2;
-        G.enemies.push(E.createEnemy('fly', e.x + Math.cos(a) * 46, e.y + Math.sin(a) * 46, G.floorNum));
+    if (e.warnT > 0) {
+      e.warnT -= dt;
+      moveEntity(e, e.dir.x * e.speed * 0.25 * dt, e.dir.y * e.speed * 0.25 * dt);
+      if (e.warnT <= 0) {
+        bossSpiralShot(e, enraged, '#ffd166');
+        bossSpiralShot(e, enraged, '#ffd166');
+        bossSpiralShot(e, enraged, '#ffd166');
+        const n = enraged ? 4 : 3;
+        const pools = (global.Dungeon && Dungeon.FLOOR_POOLS) ? Dungeon.FLOOR_POOLS : null;
+        const allowed = pools ? pools[(G.floorNum - 1) % pools.length] : ['fly'];
+        for (let i = 0; i < n; i++) {
+          const a = Math.random() * Math.PI * 2;
+          G.enemies.push(E.createEnemy(Utils.pick(Math.random, allowed), e.x + Math.cos(a) * 48, e.y + Math.sin(a) * 48, G.floorNum));
+        }
+        setMessage('¡La colmena llama a sus crías!', 1.6);
+        Sfx.play('door');
+        e.warnCd = bcd(e, enraged ? 3.4 : 5);
       }
-      setMessage('¡La colmena llama a sus crías!', 1.6);
-      Sfx.play('door');
+      return;
     }
+    // Espiral continua (muchas balas) entre invocaciones.
+    e.bossShootCd = (e.bossShootCd || 0) - dt;
+    if (e.hasWarned && e.bossShootCd <= 0) { e.bossShootCd = bcd(e, enraged ? 0.09 : 0.12); bossSpiralShot(e, enraged, '#ffd166'); }
     moveEntity(e, Math.cos(e.anim * 0.8) * e.speed * 0.6 * dt, Math.sin(e.anim * 0.7) * e.speed * 0.6 * dt);
+    e.warnCd -= dt;
+    if (e.warnCd <= 0) bossWarn(e, 'summon', 0.65, 0);
   }
 
   function bossAI(e, dt, target, d) {
@@ -1789,7 +1913,8 @@
         for (let pi = 0; pi < G.players.length; pi++) {
           const p = G.players[pi];
           if (p.dead) continue;
-          if (Utils.dist2(b.x, b.y, p.x, p.y) < (p.r + b.r) * (p.r + b.r)) {
+          const hy = p.y + C.PLAYER_HURT_DY;
+          if (Utils.dist2(b.x, b.y, p.x, hy) < (p.r + b.r) * (p.r + b.r)) {
             hurtPlayer(p, b.dmg, b.x, b.y);
             dead = true;
             break;
@@ -1806,7 +1931,8 @@
       if (e.spawnT > 0) continue;
       for (const p of G.players) {
         if (p.dead) continue;
-        if (Utils.dist2(e.x, e.y, p.x, p.y) < (e.r + p.r) * (e.r + p.r)) {
+        const hy = p.y + C.PLAYER_HURT_DY;
+        if (Utils.dist2(e.x, e.y, p.x, hy) < (e.r + p.r) * (e.r + p.r)) {
           hurtPlayer(p, e.dmg, e.x, e.y);
         }
       }
@@ -1997,6 +2123,8 @@
       n1(e.anim), n1(e.flash), n1(e.dir.x), n1(e.dir.y), e.isBoss ? 1 : 0,
       n1(e.spawnT),
       ((e.burn > 0) ? 1 : 0) | ((e.poison > 0) ? 2 : 0) | ((e.slow > 0) ? 4 : 0),
+      // telegrafiado del jefe (a partir del índice 14; nunca antes del 13)
+      n1(e.warnT || 0), n1(e.warnMax || 0), e.warnKind || '', n1(e.warnAngle || 0),
     ];
   }
 
@@ -2070,7 +2198,7 @@
         shield: num(a[20]), revives: num(a[21]), keys: num(a[22]),
         charId: (global.Characters && a[23] != null) ? Characters.LIST[Characters.normIndex(a[23])].id : 'isaac',
         abCharges: num(a[24], 0), abMax: num(a[25], 0), abCd: num(a[26], 0),
-        r: 12,
+        r: 6,
       })),
       enemies: (s.e || []).map((a) => ({
         kind: 'enemy', id: a[0], type: a[1], x: num(a[2]), y: num(a[3]),
@@ -2078,6 +2206,8 @@
         anim: num(a[7]), flash: num(a[8]),
         dir: { x: num(a[9]), y: num(a[10]) }, isBoss: !!a[11], spawnT: num(a[12]),
         st: a[13] || 0,
+        warnT: num(a[14]), warnMax: num(a[15]),
+        warnKind: a[16] || '', warnAngle: num(a[17]),
         color: (E.ENEMY_TYPES[a[1]] || E.ENEMY_TYPES.fly).color,
       })),
       bullets: (s.b || []).map((a) => ({
@@ -2190,7 +2320,7 @@
       else { lp.x = px; lp.y = py; }
       lp.srvX = mine.x;
       lp.srvY = mine.y;
-      lp.r = 12;
+      lp.r = 6;    // hitbox del jugador (igual que en el anfitrión)
     }
 
     // avisos de muerte / jefe

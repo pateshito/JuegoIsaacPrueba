@@ -1,5 +1,8 @@
 # 🎮 RogueLikeArena 2D
 
+**¡Juega ahora directamente en tu navegador!**  
+🔗 [https://pateshito.github.io/JueguitoRoguelike/](https://pateshito.github.io/JueguitoRoguelike/)
+
 **Un roguelike 2D de acción, cooperativo online y generación procedural.**  
 *Hecho 100% con HTML, CSS y JavaScript puro (sin frameworks, sin motores, sin archivos binarios).*
 
@@ -52,15 +55,3 @@ El juego utiliza una arquitectura **Host-Client** sobre **WebRTC** (gracias a [P
 - **No hay servidor de juego propio:** Los datos viajan directamente entre los navegadores de los jugadores.
 - **El Anfitrión (Host) es autoritativo:** Simula la partida (enemigos, colisiones, drops) y envía el estado a los clientes.
 - **Unirse fácilmente:** El anfitrión genera un código de 4 letras. Los demás solo deben pulsar "Unirse a sala" e introducirlo. ¡Se puede entrar con la partida en marcha!
-
----
-
-## 🚀 Cómo Ejecutar el Proyecto
-
-Al ser 100% estático, no necesitas compilar nada ni instalar dependencias de Node.js. Solo necesitas servir los archivos por HTTP (obligatorio para que el navegador permita WebRTC en el multijugador).
-
-**Opción 1: Python (Recomendado)**
-```bash
-# En la raíz del proyecto
-python3 -m http.server 8000
-# Abre tu navegador en: http://localhost:8000
